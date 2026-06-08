@@ -1,7 +1,5 @@
 name: Build APK
 on: workflow_dispatch
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,7 +11,7 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: |
-          pip install buildozer
+          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
       - name: Build APK
