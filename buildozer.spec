@@ -1,0 +1,19 @@
+[app]
+title = 活体认证
+package.name = liveauth
+package.domain = com.user
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 1.0
+requirements = python3,kivy,plyer,pycryptodome,requests,urllib3,android
+orientation = portrait
+osx.python_version = 3
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+android.api = 33
+android.minapi = 21
+android.ndk = 25b
+android.sdk = 32
+android.gradle_dependencies = 'androidx.core:core:1.9.0'
+android.arch = arm64-v8a
+android.allow_backup = True
+android.logcat_filters = *:S python:D
