@@ -1,5 +1,5 @@
 [app]
-title = 活体认证
+title = 看什么看
 package.name = liveauth
 package.domain = com.user
 source.dir = .
