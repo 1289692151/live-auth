@@ -23,6 +23,7 @@ from kivy.clock import Clock, mainthread
 from kivy.metrics import dp
 from kivy.utils import platform
 from kivy.logger import Logger
+from kivy.storage.jsonstore import JsonStore
 
 # 平台相关导入
 HAS_AS4K = False
@@ -78,6 +79,9 @@ COLOR_TEXT_LIGHT = (0.5, 0.5, 0.5, 1)
 COLOR_INPUT_BG = (0.97, 0.97, 0.99, 1)
 COLOR_LOG_BG = (0.12, 0.12, 0.14, 1)
 COLOR_LOG_TEXT = (0.95, 0.95, 0.95, 1)
+
+# 默认代理API（首次启动时使用）
+DEFAULT_PROXY_API = 'http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129'
 
 
 # ========== Android URI 复制工具 ==========
@@ -400,11 +404,13 @@ class MainScreen(BoxLayout):
         self.last_video_error = ""
         self.proxy_addr = None
         self.current_file_type = None
-        # 弹窗状态标志
         self._video_popup = None
         self._waiting_for_video_change = False
         self._pending_video_action = ""
         self._pending_video_error = ""
+
+        # ★ 关键：初始化持久化存储
+        self._init_storage()
 
         with self.canvas.before:
             Color(*COLOR_BG)
@@ -412,6 +418,42 @@ class MainScreen(BoxLayout):
         self.bind(pos=self._update_bg, size=self._update_bg)
 
         self.build_ui()
+
+    def _init_storage(self):
+        """初始化 JsonStore 存储"""
+        try:
+            # Android 上用应用私有目录
+            if platform == 'android':
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                app_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+            else:
+                app_dir = App.get_running_app().user_data_dir
+
+            store_path = os.path.join(app_dir, 'app_settings.json')
+            self.store = JsonStore(store_path)
+            Logger.info(f"存储路径: {store_path}")
+        except Exception as e:
+            Logger.error(f"存储初始化失败: {e}")
+            # 备选：当前目录
+            self.store = JsonStore('app_settings.json')
+
+    def _save_proxy_api(self, api_url):
+        """保存代理API到本地"""
+        try:
+            self.store.put('proxy_api', url=api_url)
+            self.log(f"💾 已保存代理API配置")
+        except Exception as e:
+            Logger.error(f"保存代理API失败: {e}")
+
+    def _load_proxy_api(self):
+        """加载已保存的代理API，没有则返回默认值"""
+        try:
+            if self.store.exists('proxy_api'):
+                return self.store.get('proxy_api').get('url', DEFAULT_PROXY_API)
+        except Exception as e:
+            Logger.error(f"加载代理API失败: {e}")
+        return DEFAULT_PROXY_API
 
     def _update_bg(self, *args):
         self._bg_rect.pos = self.pos
@@ -564,13 +606,18 @@ class MainScreen(BoxLayout):
         card.add_widget(title)
 
         card.add_widget(self._make_field_label('代理API地址'))
+
+        # ★ 关键：加载已保存的代理API
+        saved_proxy = self._load_proxy_api()
         self.proxy_api_input = TextInput(
-            text='http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129',
+            text=saved_proxy,
             multiline=True, size_hint_y=None, height=dp(70),
             font_size=dp(11), background_color=COLOR_INPUT_BG,
             foreground_color=COLOR_TEXT,
             padding=[dp(10), dp(8), dp(10), dp(8)]
         )
+        # ★ 关键：监听文本变化，实时保存
+        self.proxy_api_input.bind(text=self._on_proxy_api_changed)
         card.add_widget(self.proxy_api_input)
 
         self.btn_get_proxy = RoundedButton(
@@ -598,6 +645,14 @@ class MainScreen(BoxLayout):
         ))
         card.add_widget(status_row)
         return card
+
+    def _on_proxy_api_changed(self, instance, value):
+        """代理API输入框文本变化时保存（去抖）"""
+        # 用 Clock 延迟保存，避免每个字符都触发 IO
+        if hasattr(self, '_save_proxy_event') and self._save_proxy_event:
+            self._save_proxy_event.cancel()
+        self._save_proxy_event = Clock.schedule_once(
+            lambda dt: self._save_proxy_api(value), 0.5)
 
     def _build_action_area(self):
         container = BoxLayout(orientation='vertical', size_hint_y=None,
@@ -672,7 +727,6 @@ class MainScreen(BoxLayout):
     def _android_pick_file(self, file_type):
         try:
             if HAS_AS4K:
-                # ★ 修复：让 chooser 不再持有强引用，避免GC问题
                 chooser = Chooser(self._handle_chooser_result)
                 if file_type == 'image':
                     chooser.choose_content("image/*")
@@ -686,7 +740,6 @@ class MainScreen(BoxLayout):
             self._show_manual_input(file_type)
 
     def _handle_chooser_result(self, uri_list):
-        """Chooser 回调（运行在子线程）"""
         if not uri_list:
             self.log("❌ 未选择文件")
             return
@@ -728,10 +781,8 @@ class MainScreen(BoxLayout):
             self.video_path.text = local_path
             self.log(f"✅ 视频就绪 ({file_size/1024:.1f}MB)")
 
-        # ★ 关键修复：如果是视频更换流程，复制完后重新弹出确认框
         if self._waiting_for_video_change and self.current_file_type == 'video':
             self._waiting_for_video_change = False
-            # 用 Clock 主线程调度，避免线程问题
             Clock.schedule_once(
                 lambda dt: self._show_video_popup(
                     self._pending_video_action,
@@ -747,7 +798,6 @@ class MainScreen(BoxLayout):
 
     def _reset_video_change_state(self):
         self._waiting_for_video_change = False
-        # 通知主流程取消等待
         if self.continue_event and not self.continue_event.is_set():
             self.user_confirmed = False
             self.continue_event.set()
@@ -794,7 +844,6 @@ class MainScreen(BoxLayout):
             self.video_path.text = path
             self.log(f"✅ 已选择视频: {os.path.basename(path)}")
 
-        # 桌面端同步：视频更换后重新弹确认框
         if self._waiting_for_video_change and self.current_file_type == 'video':
             self._waiting_for_video_change = False
             Clock.schedule_once(
@@ -850,10 +899,13 @@ class MainScreen(BoxLayout):
 
     # ========== 代理获取 ==========
     def on_get_proxy(self, instance):
+        # ★ 关键：开始获取前先保存最新的API地址
         api_url = self.proxy_api_input.text.strip()
         if not api_url:
             self.log("❌ 请输入代理API地址")
             return
+        # 强制保存
+        self._save_proxy_api(api_url)
         self.log("⏳ 正在获取代理IP...")
         self.btn_get_proxy.disabled = True
 
@@ -878,6 +930,9 @@ class MainScreen(BoxLayout):
 
     # ========== 认证流程 ==========
     def start_auth(self, instance):
+        # ★ 关键：开始认证前先保存
+        self._save_proxy_api(self.proxy_api_input.text.strip())
+
         token = self.token_input.text.strip()
         img = self.image_path.text.strip()
         vid = self.video_path.text.strip()
@@ -975,7 +1030,6 @@ class MainScreen(BoxLayout):
 
     @mainthread
     def _show_video_popup(self, action_str, current_video, error_msg=""):
-        # ★ 修复：先关闭已存在的弹窗
         if self._video_popup:
             try:
                 self._video_popup.dismiss(force=True)
@@ -1019,15 +1073,12 @@ class MainScreen(BoxLayout):
             self.continue_event.set()
 
         def on_change(instance):
-            # ★ 修复：先关闭弹窗，再开启文件选择器
             self._video_popup = None
             popup.dismiss(force=True)
-            # 记录要恢复的状态
             self._waiting_for_video_change = True
             self._pending_video_action = action_str
             self._pending_video_error = error_msg
             self.current_file_type = 'video'
-            # 延迟一帧确保弹窗完全关闭
             Clock.schedule_once(lambda dt: self.pick_file('video'), 0.1)
 
         def on_cancel(instance):
