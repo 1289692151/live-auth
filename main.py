@@ -235,7 +235,7 @@ class MainScreen(BoxLayout):
         proxy_row1 = BoxLayout(orientation='horizontal', spacing=5, size_hint=(1, None), height=44)
         proxy_row1.add_widget(Label(text='代理API', size_hint=(None, 1), width=60, color=(0.9,0.9,0.9,1)))
         self.proxy_api_input = TextInput(
-            text='http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129',
+            text='',
             multiline=False, size_hint=(1, 1), background_color=(0.2,0.2,0.2,1), foreground_color=(1,1,1,1))
         proxy_row1.add_widget(self.proxy_api_input)
         self.btn_get_proxy = Button(text='获取代理', size_hint=(None, 1), width=80, background_color=(0.5,0.5,0.9,1), color=(1,1,1,1))
