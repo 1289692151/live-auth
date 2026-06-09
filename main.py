@@ -671,7 +671,7 @@ class MainScreen(BoxLayout):
         self.proxy_status_label.bind(size=lambda i, v: setattr(i, 'text_size', v))
         status_row.add_widget(self.proxy_status_label)
         self.use_proxy_check = CheckBox(
-            active=False, size_hint_x=None, width=dp(30),
+            active=True, size_hint_x=None, width=dp(30),
             color=COLOR_PRIMARY
         )
         status_row.add_widget(self.use_proxy_check)
