@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import sys
 import threading, json, time, gzip, uuid, base64, random
 import requests
 from Crypto.Cipher import AES, PKCS1_v1_5
@@ -23,26 +22,16 @@ from kivy.app import App
 from kivy.clock import Clock, mainthread
 from kivy.metrics import dp
 from kivy.utils import platform
+from kivy.logger import Logger
 
+# 平台相关导入
+HAS_AS4K = False
 if platform == 'android':
     try:
-        from plyer import filechooser as plyer_fc
-        HAS_PLYER = True
-    except ImportError:
-        HAS_PLYER = False
-    try:
-        from androidstorage4kivy import Chooser
-        HAS_ANDROID_STORAGE = True
-    except ImportError:
-        HAS_ANDROID_STORAGE = False
-else:
-    HAS_PLYER = False
-    HAS_ANDROID_STORAGE = False
-    try:
-        from plyer import filechooser as plyer_fc
-        HAS_PLYER = True
-    except ImportError:
-        pass
+        from androidstorage4kivy import Chooser, SharedStorage
+        HAS_AS4K = True
+    except Exception as e:
+        Logger.warning(f"androidstorage4kivy 未安装: {e}")
 
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -52,7 +41,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.filechooser import FileChooserListView
-from kivy.uix.gridlayout import GridLayout
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 
 # ========== 常量 ==========
@@ -78,7 +66,7 @@ URL_SUBMIT_REAL = "https://api.mallex.io/gateway/user/submitRealName"
 URL_FIND_ACCOUNT = "https://api.mallex.io/gateway/realnameReview/createUserRealNameReviewForFind"
 ACTION_MAP = {"0": "闭眼", "5": "点头", "6": "张口", "7": "左右摇头"}
 
-# 颜色方案
+# 颜色
 COLOR_BG = (0.96, 0.96, 0.98, 1)
 COLOR_CARD = (1, 1, 1, 1)
 COLOR_PRIMARY = (0.2, 0.6, 0.86, 1)
@@ -88,9 +76,65 @@ COLOR_WARN = (0.96, 0.62, 0.20, 1)
 COLOR_TEXT = (0.2, 0.2, 0.2, 1)
 COLOR_TEXT_LIGHT = (0.5, 0.5, 0.5, 1)
 COLOR_INPUT_BG = (0.97, 0.97, 0.99, 1)
-COLOR_BORDER = (0.85, 0.85, 0.90, 1)
 COLOR_LOG_BG = (0.12, 0.12, 0.14, 1)
 COLOR_LOG_TEXT = (0.95, 0.95, 0.95, 1)
+
+
+# ========== Android URI 复制工具 ==========
+def android_copy_uri_to_local(uri_str):
+    if not uri_str or uri_str.startswith('/'):
+        return uri_str
+    try:
+        from jnius import autoclass
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        FileOutputStream = autoclass('java.io.FileOutputStream')
+        BufferedInputStream = autoclass('java.io.BufferedInputStream')
+        BufferedOutputStream = autoclass('java.io.BufferedOutputStream')
+        Uri = autoclass('android.net.Uri')
+        OpenableColumns = autoclass('android.provider.OpenableColumns')
+
+        activity = PythonActivity.mActivity
+        resolver = activity.getContentResolver()
+        parsed_uri = Uri.parse(uri_str)
+
+        file_name = f"upload_{int(time.time() * 1000)}.bin"
+        try:
+            cursor = resolver.query(parsed_uri, None, None, None, None)
+            if cursor and cursor.moveToFirst():
+                idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if idx >= 0:
+                    n = cursor.getString(idx)
+                    if n:
+                        file_name = n
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+        cache_dir = activity.getCacheDir().getAbsolutePath()
+        dest_path = os.path.join(cache_dir, f"up_{int(time.time()*1000)}_{file_name}")
+
+        istream = resolver.openInputStream(parsed_uri)
+        bis = BufferedInputStream(istream)
+        fos = FileOutputStream(dest_path)
+        bos = BufferedOutputStream(fos)
+
+        buf = bytearray(8192)
+        while True:
+            n = bis.read(buf)
+            if n <= 0:
+                break
+            bos.write(buf, 0, n)
+        bos.flush()
+        bos.close()
+        fos.close()
+        bis.close()
+        istream.close()
+        return dest_path
+    except Exception as e:
+        Logger.error(f"URI 复制失败: {e}")
+        return None
+
 
 # ========== 工具函数 ==========
 def gen_request_id():
@@ -119,10 +163,12 @@ def rsa_encrypt(data: bytes) -> str:
     return PKCS1_v1_5.new(pub).encrypt(data).hex().upper()
 
 def aes_encrypt(plain, key, iv):
-    k, i = key.encode("utf-8"), iv.encode("utf-8")
-    return AES.new(k, AES.MODE_CBC, i).encrypt(pad(plain, AES.block_size))
+    return AES.new(key.encode("utf-8"), AES.MODE_CBC, iv.encode("utf-8")).encrypt(
+        pad(plain, AES.block_size))
 
 def encrypt_file(file_path):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"文件不存在: {file_path}")
     with open(file_path, "rb") as f:
         raw = f.read()
     uid = uuid.uuid4().hex
@@ -189,10 +235,11 @@ def step1_get_auth_token(log, token, proxy_api=None, use_proxy=False):
 
 def step2_upload_image(log, img_path, auth_token):
     log("⏳ 正在上传人脸图片...")
-    if not os.path.exists(img_path):
-        log("❌ 图片文件不存在")
+    try:
+        b64, dk, _ = encrypt_file(img_path)
+    except Exception as e:
+        log(f"❌ 图片处理失败：{e}")
         return False
-    b64, dk, _ = encrypt_file(img_path)
     headers = {"Content-Type": "application/json", "Content-Encoding": "gzip",
                "Data-Key": dk, "User-Agent": "Dalvik/2.1.0"}
     payload = {"images": [{"image": b64, "face_field": "quality", "image_type": "BASE64"}],
@@ -232,10 +279,11 @@ def step3_get_session_id(log, auth_token, proxy_api=None, use_proxy=False):
 
 def step4_upload_video(log, vid_path, auth_token, session_id):
     log("⏳ 正在上传视频...")
-    if not os.path.exists(vid_path):
-        log("❌ 视频文件不存在")
-        return False, None, ""
-    b64, dk, _ = encrypt_file(vid_path)
+    try:
+        b64, dk, _ = encrypt_file(vid_path)
+    except Exception as e:
+        log(f"❌ 视频处理失败：{e}")
+        return False, None, str(e)
     headers = {"Content-Type": "application/json", "Content-Encoding": "gzip",
                "Data-Key": dk, "User-Agent": "Dalvik/2.1.0"}
     payload = {"app_key": APP_KEY, "platform_type": 2, "session_id": session_id,
@@ -304,7 +352,6 @@ def step6_find_account(log, login_token, id_card, proxy_api=None, use_proxy=Fals
 
 # ========== 自定义组件 ==========
 class RoundedButton(Button):
-    """圆角按钮"""
     def __init__(self, bg_color=COLOR_PRIMARY, **kwargs):
         super().__init__(**kwargs)
         self.background_normal = ''
@@ -331,7 +378,6 @@ class RoundedButton(Button):
 
 
 class CardLayout(BoxLayout):
-    """卡片布局"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         with self.canvas.before:
@@ -354,6 +400,11 @@ class MainScreen(BoxLayout):
         self.last_video_error = ""
         self.proxy_addr = None
         self.current_file_type = None
+        # 弹窗状态标志
+        self._video_popup = None
+        self._waiting_for_video_change = False
+        self._pending_video_action = ""
+        self._pending_video_error = ""
 
         with self.canvas.before:
             Color(*COLOR_BG)
@@ -390,13 +441,14 @@ class MainScreen(BoxLayout):
 
     def _update_header_rect(self, *args):
         if hasattr(self, '_header_rect') and self.children:
-            self._header_rect.pos = self.children[-1].pos
-            self._header_rect.size = self.children[-1].size
+            try:
+                self._header_rect.pos = self.children[-1].pos
+                self._header_rect.size = self.children[-1].size
+            except:
+                pass
 
     def _build_body(self):
-        # 可滚动主体
-        body_scroll = ScrollView(size_hint=(1, 0.55), do_scroll_x=False,
-                                bar_width=dp(4))
+        body_scroll = ScrollView(size_hint=(1, 0.55), do_scroll_x=False, bar_width=dp(4))
         body = BoxLayout(orientation='vertical',
                         size_hint_y=None, padding=[dp(10), dp(8)], spacing=dp(8))
         body.bind(minimum_height=body.setter('height'))
@@ -409,13 +461,19 @@ class MainScreen(BoxLayout):
         body_scroll.add_widget(body)
         self.add_widget(body_scroll)
 
+    def _make_field_label(self, text):
+        lbl = Label(
+            text=text, color=COLOR_TEXT, font_size=dp(13), bold=True,
+            size_hint_y=None, height=dp(20),
+            halign='left', valign='middle'
+        )
+        lbl.bind(size=lambda i, v: setattr(i, 'text_size', v))
+        return lbl
+
     def _build_user_card(self):
-        """认证信息卡片 - 简化版本"""
         card = CardLayout(orientation='vertical',
                          size_hint_y=None, height=dp(250),
                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-
-        # 标题
         title = Label(text='📋 认证信息',
                      font_size=dp(15), bold=True,
                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
@@ -423,60 +481,41 @@ class MainScreen(BoxLayout):
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
-        # Token输入
         card.add_widget(self._make_field_label('登录Token'))
         self.token_input = TextInput(
-            hint_text='请输入登录Token',
-            multiline=False,
-            size_hint_y=None, height=dp(40),
-            font_size=dp(14),
-            background_color=COLOR_INPUT_BG,
-            foreground_color=COLOR_TEXT,
-            hint_text_color=COLOR_TEXT_LIGHT,
-            cursor_color=COLOR_PRIMARY,
+            hint_text='请输入登录Token', multiline=False,
+            size_hint_y=None, height=dp(40), font_size=dp(14),
+            background_color=COLOR_INPUT_BG, foreground_color=COLOR_TEXT,
+            hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
         card.add_widget(self.token_input)
 
-        # 身份证
         card.add_widget(self._make_field_label('身份证号'))
         self.id_card_input = TextInput(
-            hint_text='请输入身份证号',
-            multiline=False,
-            size_hint_y=None, height=dp(40),
-            font_size=dp(14),
-            background_color=COLOR_INPUT_BG,
-            foreground_color=COLOR_TEXT,
-            hint_text_color=COLOR_TEXT_LIGHT,
-            cursor_color=COLOR_PRIMARY,
+            hint_text='请输入身份证号', multiline=False,
+            size_hint_y=None, height=dp(40), font_size=dp(14),
+            background_color=COLOR_INPUT_BG, foreground_color=COLOR_TEXT,
+            hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
         card.add_widget(self.id_card_input)
 
-        # 姓名
         card.add_widget(self._make_field_label('姓名'))
         self.name_input = TextInput(
-            hint_text='请输入姓名',
-            multiline=False,
-            size_hint_y=None, height=dp(40),
-            font_size=dp(14),
-            background_color=COLOR_INPUT_BG,
-            foreground_color=COLOR_TEXT,
-            hint_text_color=COLOR_TEXT_LIGHT,
-            cursor_color=COLOR_PRIMARY,
+            hint_text='请输入姓名', multiline=False,
+            size_hint_y=None, height=dp(40), font_size=dp(14),
+            background_color=COLOR_INPUT_BG, foreground_color=COLOR_TEXT,
+            hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
         card.add_widget(self.name_input)
-
         return card
 
     def _build_file_card(self):
-        """文件选择卡片"""
         card = CardLayout(orientation='vertical',
                          size_hint_y=None, height=dp(180),
                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-
-        # 标题
         title = Label(text='📁 文件选择',
                      font_size=dp(15), bold=True,
                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
@@ -484,14 +523,11 @@ class MainScreen(BoxLayout):
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
-        # 图片选择 - 使用GridLayout避免挤压
         card.add_widget(self._make_field_label('人脸图片'))
         img_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         self.image_path = TextInput(
-            hint_text='未选择',
-            multiline=False, readonly=True,
-            font_size=dp(13),
-            background_color=COLOR_INPUT_BG,
+            hint_text='未选择', multiline=False, readonly=True,
+            font_size=dp(13), background_color=COLOR_INPUT_BG,
             foreground_color=COLOR_TEXT,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
@@ -501,14 +537,11 @@ class MainScreen(BoxLayout):
         img_row.add_widget(btn_img)
         card.add_widget(img_row)
 
-        # 视频选择
         card.add_widget(self._make_field_label('动作视频'))
         vid_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
         self.video_path = TextInput(
-            hint_text='未选择',
-            multiline=False, readonly=True,
-            font_size=dp(13),
-            background_color=COLOR_INPUT_BG,
+            hint_text='未选择', multiline=False, readonly=True,
+            font_size=dp(13), background_color=COLOR_INPUT_BG,
             foreground_color=COLOR_TEXT,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
@@ -517,16 +550,12 @@ class MainScreen(BoxLayout):
         btn_vid.bind(on_press=lambda x: self.pick_file('video'))
         vid_row.add_widget(btn_vid)
         card.add_widget(vid_row)
-
         return card
 
     def _build_proxy_card(self):
-        """代理设置卡片 - 关键修复点"""
         card = CardLayout(orientation='vertical',
-                         size_hint_y=None, height=dp(210),  # 增加高度
+                         size_hint_y=None, height=dp(210),
                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-
-        # 标题
         title = Label(text='🌐 代理设置（可选）',
                      font_size=dp(15), bold=True,
                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
@@ -534,101 +563,65 @@ class MainScreen(BoxLayout):
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
-        # 代理API标签
         card.add_widget(self._make_field_label('代理API地址'))
-
-        # 关键修复：使用多行输入框避免被挤压
         self.proxy_api_input = TextInput(
             text='http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129',
-            multiline=True,  # 允许多行显示
-            size_hint_y=None, height=dp(70),  # 足够高度
-            font_size=dp(11),
-            background_color=COLOR_INPUT_BG,
+            multiline=True, size_hint_y=None, height=dp(70),
+            font_size=dp(11), background_color=COLOR_INPUT_BG,
             foreground_color=COLOR_TEXT,
             padding=[dp(10), dp(8), dp(10), dp(8)]
         )
         card.add_widget(self.proxy_api_input)
 
-        # 获取代理按钮
         self.btn_get_proxy = RoundedButton(
-            text='🔄 获取代理IP',
-            bg_color=COLOR_WARN,
+            text='🔄 获取代理IP', bg_color=COLOR_WARN,
             size_hint_y=None, height=dp(36)
         )
         self.btn_get_proxy.bind(on_press=self.on_get_proxy)
         card.add_widget(self.btn_get_proxy)
 
-        # 代理状态行
         status_row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(8))
         self.proxy_status_label = Label(
-            text='未获取代理',
-            color=COLOR_TEXT_LIGHT, font_size=dp(12),
+            text='未获取代理', color=COLOR_TEXT_LIGHT, font_size=dp(12),
             halign='left', valign='middle', size_hint_x=0.7
         )
         self.proxy_status_label.bind(size=lambda i, v: setattr(i, 'text_size', v))
         status_row.add_widget(self.proxy_status_label)
-
-        # 复选框
         self.use_proxy_check = CheckBox(
-            active=False,
-            size_hint_x=None, width=dp(30),
+            active=False, size_hint_x=None, width=dp(30),
             color=COLOR_PRIMARY
         )
         status_row.add_widget(self.use_proxy_check)
         status_row.add_widget(Label(
-            text='启用',
-            color=COLOR_TEXT, font_size=dp(12),
+            text='启用', color=COLOR_TEXT, font_size=dp(12),
             size_hint_x=None, width=dp(35)
         ))
         card.add_widget(status_row)
-
         return card
 
     def _build_action_area(self):
-        """操作按钮区域"""
         container = BoxLayout(orientation='vertical', size_hint_y=None,
                             height=dp(70), spacing=dp(6))
-
-        # 状态栏
         self.status_label = Label(
-            text='● 状态：准备就绪',
-            color=COLOR_SUCCESS, font_size=dp(13), bold=True,
-            size_hint_y=None, height=dp(24),
+            text='● 状态：准备就绪', color=COLOR_SUCCESS,
+            font_size=dp(13), bold=True, size_hint_y=None, height=dp(24),
             halign='left', valign='middle'
         )
         self.status_label.bind(size=lambda i, v: setattr(i, 'text_size', v))
         container.add_widget(self.status_label)
 
-        # 开始按钮
         self.btn_start = RoundedButton(
-            text='🚀 开始认证',
-            bg_color=COLOR_SUCCESS,
-            size_hint_y=None, height=dp(44),
-            font_size=dp(16)
+            text='🚀 开始认证', bg_color=COLOR_SUCCESS,
+            size_hint_y=None, height=dp(44), font_size=dp(16)
         )
         self.btn_start.bind(on_press=self.start_auth)
         container.add_widget(self.btn_start)
-
         return container
 
-    def _make_field_label(self, text):
-        """创建字段标签"""
-        lbl = Label(
-            text=text,
-            color=COLOR_TEXT, font_size=dp(13), bold=True,
-            size_hint_y=None, height=dp(20),
-            halign='left', valign='middle'
-        )
-        lbl.bind(size=lambda i, v: setattr(i, 'text_size', v))
-        return lbl
-
     def _build_log_area(self):
-        """日志区域"""
         log_container = BoxLayout(orientation='vertical',
                                  size_hint=(1, 0.45),
                                  padding=[dp(10), dp(4), dp(10), dp(10)])
-
-        # 日志标题
         log_title = Label(text='📜 认证日志',
                          font_size=dp(13), bold=True,
                          color=COLOR_TEXT, size_hint_y=None, height=dp(24),
@@ -636,9 +629,7 @@ class MainScreen(BoxLayout):
         log_title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         log_container.add_widget(log_title)
 
-        # 日志框
-        self.log_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False,
-                                    bar_width=dp(4))
+        self.log_scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False, bar_width=dp(4))
         with self.log_scroll.canvas.before:
             Color(*COLOR_LOG_BG)
             self._log_rect = RoundedRectangle(pos=self.log_scroll.pos,
@@ -651,83 +642,124 @@ class MainScreen(BoxLayout):
                                 halign='left', valign='top',
                                 color=COLOR_LOG_TEXT,
                                 font_size=dp(12),
-                                padding=[dp(10), dp(8), dp(10), dp(8)],
-                                markup=True)
+                                padding=[dp(10), dp(8), dp(10), dp(8)])
         self.log_content.bind(texture_size=self.log_content.setter('size'),
                              width=self._update_log_text_size)
         self.log_scroll.add_widget(self.log_content)
         log_container.add_widget(self.log_scroll)
-
         self.add_widget(log_container)
 
     def _update_log_rect(self, *args):
         if hasattr(self, '_log_rect'):
-            self._log_rect.pos = self.log_scroll.pos
-            self._log_rect.size = self.log_scroll.size
+            try:
+                self._log_rect.pos = self.log_scroll.pos
+                self._log_rect.size = self.log_scroll.size
+            except:
+                pass
 
     def _update_log_text_size(self, instance, value):
         instance.text_size = (value, None)
 
-    # ========== 文件选择（跨平台修复） ==========
+    # ========== 文件选择 ==========
     def pick_file(self, file_type):
-        """跨平台文件选择"""
         self.current_file_type = file_type
+        self.log(f"⏳ 正在打开{('图片' if file_type == 'image' else '视频')}选择器...")
         if platform == 'android':
             self._android_pick_file(file_type)
         else:
             self._kivy_pick_file(file_type)
 
     def _android_pick_file(self, file_type):
-        """Android平台文件选择"""
-        self.log(f"⏳ 正在打开{('图片' if file_type == 'image' else '视频')}选择器...")
         try:
-            if HAS_PLYER:
+            if HAS_AS4K:
+                # ★ 修复：让 chooser 不再持有强引用，避免GC问题
+                chooser = Chooser(self._handle_chooser_result)
                 if file_type == 'image':
-                    filters = ["image/*"]
+                    chooser.choose_content("image/*")
                 else:
-                    filters = ["video/*"]
-                plyer_fc.open_file(
-                    title=f"选择{('图片' if file_type == 'image' else '视频')}",
-                    filters=filters,
-                    on_selection=self._on_android_file_selected
-                )
-            elif HAS_ANDROID_STORAGE:
-                chooser = Chooser(self._handle_file_chooser_result)
-                chooser.choose_content("*/*")
+                    chooser.choose_content("video/*")
             else:
-                self.log("❌ 文件选择器不可用")
+                self.log("❌ 未安装 androidstorage4kivy")
                 self._show_manual_input(file_type)
         except Exception as e:
             self.log(f"❌ 打开文件选择器失败: {e}")
             self._show_manual_input(file_type)
 
-    def _on_android_file_selected(self, selection):
-        """Android文件选择回调"""
-        Clock.schedule_once(lambda dt: self._handle_file_selection(selection), 0)
+    def _handle_chooser_result(self, uri_list):
+        """Chooser 回调（运行在子线程）"""
+        if not uri_list:
+            self.log("❌ 未选择文件")
+            return
+        uri = uri_list[0] if isinstance(uri_list, list) else uri_list
+        self.log("⏳ 正在复制文件到本地...")
 
-    def _handle_file_chooser_result(self, uri_list):
-        """Chooser回调"""
-        if uri_list:
+        def _do_copy():
             try:
-                from androidstorage4kivy import SharedStorage
-                ss = SharedStorage()
-                private_path = ss.copy_from_shared(uri_list[0])
-                self._handle_file_selection([private_path])
+                if HAS_AS4K:
+                    try:
+                        ss = SharedStorage()
+                        local_path = ss.copy_from_shared(uri)
+                    except Exception:
+                        local_path = android_copy_uri_to_local(uri)
+                else:
+                    local_path = android_copy_uri_to_local(uri)
+
+                Clock.schedule_once(lambda dt: self._on_file_ready(local_path), 0)
             except Exception as e:
-                self.log(f"❌ 文件处理失败: {e}")
+                err = str(e)
+                Clock.schedule_once(lambda dt: self._on_file_error(err), 0)
+
+        threading.Thread(target=_do_copy, daemon=True).start()
+
+    @mainthread
+    def _on_file_ready(self, local_path):
+        if not local_path or not os.path.exists(local_path):
+            self.log("❌ 文件复制失败")
+            self._reset_video_change_state()
+            return
+        try:
+            file_size = os.path.getsize(local_path) / 1024
+        except:
+            file_size = 0
+        if self.current_file_type == 'image':
+            self.image_path.text = local_path
+            self.log(f"✅ 图片就绪 ({file_size:.1f}KB)")
+        else:
+            self.video_path.text = local_path
+            self.log(f"✅ 视频就绪 ({file_size/1024:.1f}MB)")
+
+        # ★ 关键修复：如果是视频更换流程，复制完后重新弹出确认框
+        if self._waiting_for_video_change and self.current_file_type == 'video':
+            self._waiting_for_video_change = False
+            # 用 Clock 主线程调度，避免线程问题
+            Clock.schedule_once(
+                lambda dt: self._show_video_popup(
+                    self._pending_video_action,
+                    local_path,
+                    self._pending_video_error
+                ), 0.3
+            )
+
+    @mainthread
+    def _on_file_error(self, err):
+        self.log(f"❌ 文件错误: {err}")
+        self._reset_video_change_state()
+
+    def _reset_video_change_state(self):
+        self._waiting_for_video_change = False
+        # 通知主流程取消等待
+        if self.continue_event and not self.continue_event.is_set():
+            self.user_confirmed = False
+            self.continue_event.set()
 
     def _kivy_pick_file(self, file_type):
-        """Kivy原生文件选择器（桌面端）"""
         content = BoxLayout(orientation='vertical', spacing=dp(8), padding=dp(8))
-
         default_path = os.path.expanduser('~')
         filechooser = FileChooserListView(path=default_path, dirselect=False)
-
         if file_type == 'image':
             filechooser.filters = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.webp']
         else:
             filechooser.filters = ['*.mp4', '*.avi', '*.mov', '*.mkv', '*.3gp', '*.flv']
-
         filechooser.size_hint_y = 0.85
         content.add_widget(filechooser)
 
@@ -750,13 +782,11 @@ class MainScreen(BoxLayout):
         popup.open()
 
     def _handle_file_selection(self, selection):
-        """处理文件选择结果"""
         if not selection:
             return
         path = selection[0] if isinstance(selection, list) else selection
         if isinstance(path, tuple):
             path = path[0]
-
         if self.current_file_type == 'image':
             self.image_path.text = path
             self.log(f"✅ 已选择图片: {os.path.basename(path)}")
@@ -764,14 +794,23 @@ class MainScreen(BoxLayout):
             self.video_path.text = path
             self.log(f"✅ 已选择视频: {os.path.basename(path)}")
 
+        # 桌面端同步：视频更换后重新弹确认框
+        if self._waiting_for_video_change and self.current_file_type == 'video':
+            self._waiting_for_video_change = False
+            Clock.schedule_once(
+                lambda dt: self._show_video_popup(
+                    self._pending_video_action,
+                    path,
+                    self._pending_video_error
+                ), 0.2
+            )
+
     def _show_manual_input(self, file_type):
-        """手动输入文件路径（备选）"""
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
         content.add_widget(Label(text=f"请输入{('图片' if file_type == 'image' else '视频')}完整路径:",
                                 size_hint_y=None, height=dp(30)))
         path_input = TextInput(hint_text='/sdcard/...', multiline=False,
-                              size_hint_y=None, height=dp(40),
-                              font_size=dp(13))
+                              size_hint_y=None, height=dp(40), font_size=dp(13))
         content.add_widget(path_input)
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
@@ -848,6 +887,13 @@ class MainScreen(BoxLayout):
         if not all([token, img, vid, idcard, name]):
             self.log("❌ 请填写所有信息并选择文件")
             self.set_status("信息不完整", COLOR_DANGER)
+            return
+
+        if not os.path.exists(img):
+            self.log(f"❌ 图片文件不存在: {img}")
+            return
+        if not os.path.exists(vid):
+            self.log(f"❌ 视频文件不存在: {vid}")
             return
 
         use_proxy = self.use_proxy_check.active
@@ -927,7 +973,16 @@ class MainScreen(BoxLayout):
         self.continue_event.wait()
         return self.user_confirmed, self.new_video_path
 
+    @mainthread
     def _show_video_popup(self, action_str, current_video, error_msg=""):
+        # ★ 修复：先关闭已存在的弹窗
+        if self._video_popup:
+            try:
+                self._video_popup.dismiss(force=True)
+            except:
+                pass
+            self._video_popup = None
+
         content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
 
         info = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(80), spacing=dp(4))
@@ -952,26 +1007,42 @@ class MainScreen(BoxLayout):
             content.add_widget(err)
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
-
         popup = Popup(title='确认视频文件', content=content,
                      size_hint=(0.9, None), height=dp(230), auto_dismiss=False)
+        self._video_popup = popup
 
         def on_continue(instance):
             self.user_confirmed = True
+            self.new_video_path = self.video_path.text
+            self._video_popup = None
             popup.dismiss()
             self.continue_event.set()
 
         def on_change(instance):
-            popup.dismiss()
+            # ★ 修复：先关闭弹窗，再开启文件选择器
+            self._video_popup = None
+            popup.dismiss(force=True)
+            # 记录要恢复的状态
+            self._waiting_for_video_change = True
+            self._pending_video_action = action_str
+            self._pending_video_error = error_msg
             self.current_file_type = 'video'
-            self.pick_file('video')
-            threading.Timer(1.0, lambda: self._show_video_popup(action_str,
-                           self.video_path.text, self.last_video_error)).start()
+            # 延迟一帧确保弹窗完全关闭
+            Clock.schedule_once(lambda dt: self.pick_file('video'), 0.1)
 
+        def on_cancel(instance):
+            self.user_confirmed = False
+            self._video_popup = None
+            popup.dismiss()
+            self.continue_event.set()
+
+        btn_cancel = RoundedButton(text='取消', bg_color=COLOR_TEXT_LIGHT)
+        btn_cancel.bind(on_press=on_cancel)
         btn_change = RoundedButton(text='更换视频', bg_color=COLOR_WARN)
         btn_change.bind(on_press=on_change)
         btn_continue = RoundedButton(text='使用当前', bg_color=COLOR_SUCCESS)
         btn_continue.bind(on_press=on_continue)
+        btn_box.add_widget(btn_cancel)
         btn_box.add_widget(btn_change)
         btn_box.add_widget(btn_continue)
         content.add_widget(btn_box)
@@ -992,9 +1063,14 @@ class LiveAuthApp(App):
                     Permission.READ_MEDIA_VIDEO,
                 ])
             except Exception as e:
-                print(f"权限申请失败: {e}")
+                Logger.warning(f"权限申请失败: {e}")
         return MainScreen()
 
 
 if __name__ == '__main__':
-    LiveAuthApp().run()
+    try:
+        LiveAuthApp().run()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        Logger.error(f"App 启动失败: {e}")
