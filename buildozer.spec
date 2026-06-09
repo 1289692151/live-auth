@@ -17,3 +17,5 @@ android.build_tools_version = 34.0.0
 android.allow_backup = True
 android.logcat_filters = *:S python:D
 source.include_exts = py,png,jpg,kv,atlas,ttf
+requirements = python3, kivy, requests, pycryptodome, plyer, androidstorage4kivy
+
