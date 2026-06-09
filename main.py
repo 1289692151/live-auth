@@ -3,14 +3,16 @@ import os
 from kivy.core.text import LabelBase
 from kivy.resources import resource_add_path, resource_find
 
-# ========== 字体设置 ==========
-if hasattr(os, 'environ') and 'ANDROID_ARGUMENT' in os.environ:
-    font_path = resource_find('fonts/DroidSansFallback.ttf')
-    if font_path:
-        LabelBase.register(name='Roboto', fn_regular=font_path)
+# 使用本地字体文件（支持中文）
+if os.path.exists('font.ttf'):
+    font_path = 'font.ttf'
 else:
-    resource_add_path(r"C:\Windows\Fonts")
-    LabelBase.register(name='Roboto', fn_regular='msyh.ttc')
+    # 备用：尝试查找内置字体
+    font_path = resource_find('fonts/DroidSansFallback.ttf')
+    if not font_path:
+        font_path = 'font.ttf'  # 回退
+
+LabelBase.register(name='Roboto', fn_regular=font_path)
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
