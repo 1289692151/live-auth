@@ -80,7 +80,6 @@ COLOR_INPUT_BG = (0.97, 0.97, 0.99, 1)
 COLOR_LOG_BG = (0.12, 0.12, 0.14, 1)
 COLOR_LOG_TEXT = (0.95, 0.95, 0.95, 1)
 
-# 默认代理API（首次启动时使用）
 DEFAULT_PROXY_API = 'http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129'
 
 
@@ -325,7 +324,7 @@ def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None,
             log("✅ 实名认证通过！")
             return True, False
         elif code == "REAL_NAME_AUTH_OTHER":
-            log("⚠️ 该身份证已被其他账号绑定，正在尝试找回...")
+            log("⚠️ 该身份证已被其他账号绑定，需要找回")
             return False, True
         else:
             log(f"❌ 实名认证失败：{result.get('msg')}")
@@ -408,8 +407,11 @@ class MainScreen(BoxLayout):
         self._waiting_for_video_change = False
         self._pending_video_action = ""
         self._pending_video_error = ""
+        # ★ 新增：找回确认弹窗相关
+        self._find_event = threading.Event()
+        self._find_agreed = False
+        self._find_popup = None
 
-        # ★ 关键：初始化持久化存储
         self._init_storage()
 
         with self.canvas.before:
@@ -420,26 +422,21 @@ class MainScreen(BoxLayout):
         self.build_ui()
 
     def _init_storage(self):
-        """初始化 JsonStore 存储"""
         try:
-            # Android 上用应用私有目录
             if platform == 'android':
                 from jnius import autoclass
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 app_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
             else:
                 app_dir = App.get_running_app().user_data_dir
-
             store_path = os.path.join(app_dir, 'app_settings.json')
             self.store = JsonStore(store_path)
             Logger.info(f"存储路径: {store_path}")
         except Exception as e:
             Logger.error(f"存储初始化失败: {e}")
-            # 备选：当前目录
             self.store = JsonStore('app_settings.json')
 
     def _save_proxy_api(self, api_url):
-        """保存代理API到本地"""
         try:
             self.store.put('proxy_api', url=api_url)
             self.log(f"💾 已保存代理API配置")
@@ -447,7 +444,6 @@ class MainScreen(BoxLayout):
             Logger.error(f"保存代理API失败: {e}")
 
     def _load_proxy_api(self):
-        """加载已保存的代理API，没有则返回默认值"""
         try:
             if self.store.exists('proxy_api'):
                 return self.store.get('proxy_api').get('url', DEFAULT_PROXY_API)
@@ -607,7 +603,6 @@ class MainScreen(BoxLayout):
 
         card.add_widget(self._make_field_label('代理API地址'))
 
-        # ★ 关键：加载已保存的代理API
         saved_proxy = self._load_proxy_api()
         self.proxy_api_input = TextInput(
             text=saved_proxy,
@@ -616,7 +611,6 @@ class MainScreen(BoxLayout):
             foreground_color=COLOR_TEXT,
             padding=[dp(10), dp(8), dp(10), dp(8)]
         )
-        # ★ 关键：监听文本变化，实时保存
         self.proxy_api_input.bind(text=self._on_proxy_api_changed)
         card.add_widget(self.proxy_api_input)
 
@@ -647,8 +641,6 @@ class MainScreen(BoxLayout):
         return card
 
     def _on_proxy_api_changed(self, instance, value):
-        """代理API输入框文本变化时保存（去抖）"""
-        # 用 Clock 延迟保存，避免每个字符都触发 IO
         if hasattr(self, '_save_proxy_event') and self._save_proxy_event:
             self._save_proxy_event.cancel()
         self._save_proxy_event = Clock.schedule_once(
@@ -899,12 +891,10 @@ class MainScreen(BoxLayout):
 
     # ========== 代理获取 ==========
     def on_get_proxy(self, instance):
-        # ★ 关键：开始获取前先保存最新的API地址
         api_url = self.proxy_api_input.text.strip()
         if not api_url:
             self.log("❌ 请输入代理API地址")
             return
-        # 强制保存
         self._save_proxy_api(api_url)
         self.log("⏳ 正在获取代理IP...")
         self.btn_get_proxy.disabled = True
@@ -930,7 +920,6 @@ class MainScreen(BoxLayout):
 
     # ========== 认证流程 ==========
     def start_auth(self, instance):
-        # ★ 关键：开始认证前先保存
         self._save_proxy_api(self.proxy_api_input.text.strip())
 
         token = self.token_input.text.strip()
@@ -1004,6 +993,13 @@ class MainScreen(BoxLayout):
                 self.set_status("✅ 实名认证通过", COLOR_SUCCESS)
                 self.log("🎉 恭喜！实名认证全部完成")
             elif need_find:
+                # ★ 修改：先弹确认框让用户选择
+                agreed = self.ask_user_for_find(idcard)
+                if not agreed:
+                    self.set_status("已取消找回", COLOR_WARN)
+                    self.log("⚠️ 用户取消找回身份证")
+                    return
+                # 同意后才执行找回
                 if step6_find_account(self.log, token, idcard, proxy_api, use_proxy):
                     self.set_status("✅ 找回成功", COLOR_SUCCESS)
                     self.log("🎉 找回并认证成功！")
@@ -1020,6 +1016,7 @@ class MainScreen(BoxLayout):
             self.btn_start.disabled = False
             self.log("========== 流程结束 ==========\n")
 
+    # ========== 视频确认弹窗 ==========
     def ask_user_for_video(self, action_str, current_video, error_msg=""):
         self.continue_event.clear()
         self.user_confirmed = False
@@ -1097,6 +1094,85 @@ class MainScreen(BoxLayout):
         btn_box.add_widget(btn_change)
         btn_box.add_widget(btn_continue)
         content.add_widget(btn_box)
+        popup.open()
+
+    # ★ 新增：找回身份证确认弹窗
+    def ask_user_for_find(self, id_card):
+        """弹窗询问用户是否同意找回身份证，同意返回 True"""
+        self._find_event.clear()
+        self._find_agreed = False
+        Clock.schedule_once(lambda dt: self._show_find_popup(id_card), 0)
+        self._find_event.wait()
+        return self._find_agreed
+
+    @mainthread
+    def _show_find_popup(self, id_card):
+        # 防止重复弹窗
+        if self._find_popup:
+            try:
+                self._find_popup.dismiss(force=True)
+            except:
+                pass
+            self._find_popup = None
+
+        content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
+
+        # 标题
+        title = Label(
+            text="⚠️ 身份证已被占用",
+            color=COLOR_WARN, font_size=dp(16), bold=True,
+            size_hint_y=None, height=dp(30),
+            halign='center', valign='middle'
+        )
+        title.bind(size=lambda i, v: setattr(i, 'text_size', v))
+        content.add_widget(title)
+
+        # 提示信息
+        masked_id = id_card[:6] + "********" + id_card[-4:] if len(id_card) >= 10 else id_card
+        info_text = (
+            f"身份证号 {masked_id} 已被其他账号绑定。\n\n"
+            f"是否同意申请将该身份证找回并绑定到当前账号？\n\n"
+            f"• 同意：系统将提交找回申请\n"
+            f"• 不同意：取消本次操作"
+        )
+        info = Label(
+            text=info_text,
+            color=COLOR_TEXT, font_size=dp(13),
+            halign='left', valign='top'
+        )
+        info.bind(size=lambda i, v: setattr(i, 'text_size', v))
+        content.add_widget(info)
+
+        # 按钮
+        btn_box = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(12))
+        popup = Popup(
+            title='找回身份证确认',
+            content=content,
+            size_hint=(0.9, None), height=dp(320),
+            auto_dismiss=False
+        )
+        self._find_popup = popup
+
+        def on_agree(instance):
+            self._find_agreed = True
+            self._find_popup = None
+            popup.dismiss()
+            self._find_event.set()
+
+        def on_disagree(instance):
+            self._find_agreed = False
+            self._find_popup = None
+            popup.dismiss()
+            self._find_event.set()
+
+        btn_disagree = RoundedButton(text='不同意', bg_color=COLOR_TEXT_LIGHT)
+        btn_disagree.bind(on_press=on_disagree)
+        btn_agree = RoundedButton(text='同意', bg_color=COLOR_SUCCESS)
+        btn_agree.bind(on_press=on_agree)
+        btn_box.add_widget(btn_disagree)
+        btn_box.add_widget(btn_agree)
+        content.add_widget(btn_box)
+
         popup.open()
 
 
