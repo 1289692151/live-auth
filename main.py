@@ -225,7 +225,7 @@ def test_proxy(proxy_addr):
     return False
 
 
-def safe_request(method, url, log, proxy_api=None, use_proxy=True, **kwargs):
+def safe_request(method, url, log, proxy_api=None, use_proxy=True, timeout=30, **kwargs):
     """代理请求 - 支持多次重试和自动剔除失败IP"""
     if use_proxy and proxy_api:
         for attempt in range(3):
@@ -246,7 +246,7 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, **kwargs):
             log("  [代理] 多次获取均失败，尝试直连")
 
     try:
-        return requests.request(method, url, timeout=30, **kwargs)
+        return requests.request(method, url, timeout=timeout, **kwargs)
     except requests.exceptions.RequestException as e:
         if use_proxy and proxy_api and 'proxies' in kwargs:
             log(f"  [代理] 请求失败，尝试更换IP...")
@@ -255,10 +255,11 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, **kwargs):
                 kwargs['proxies'] = {"http": f"http://{new_proxy}", "https": f"http://{new_proxy}"}
                 log(f"  [代理] 换用 {new_proxy} 重试")
                 try:
-                    return requests.request(method, url, timeout=30, **kwargs)
+                    return requests.request(method, url, timeout=timeout, **kwargs)
                 except:
                     pass
         raise e
+
 
 
 # ========== 业务函数 ==========
