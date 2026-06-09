@@ -51,12 +51,12 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCuQue3tJHQi+wm0vDThx/YUgSE
 LuDvtshM0gA8pCfUypukml1dye6sDrUbMprndaAEgsPaSBQOOkzpHvLq3wsTr3jy
 DUUYn9oyokXmuCUT5wIDAQAB
 -----END PUBLIC KEY-----"""
-APP_KEY = "kTee33zj"
-BUNDLE_ID = "com.mallex.pg.app"
-HOTFIX_VERSION = "91"
+APP_KEY = "aeQqc6Pm"
+BUNDLE_ID = "com.eipp.cuya.mallex.app"
+HOTFIX_VERSION = "93"
 LANGUAGE = "zh-CN"
 OS = "Android"
-VERSION = "1.3.1"
+VERSION = "1.4.1"
 SIGN_VERSION = "2"
 FIXED_SIGN = "b87766420f91cbfcfde1c0d232de5b99"
 URL_AUTH_TOKEN = "https://api.mallex.io/gateway/user/realNameToken"
