@@ -183,42 +183,83 @@ def encrypt_file(file_path):
     return b64, dk, uid
 
 def fetch_proxy(api_url):
+    """从API获取代理IP"""
     try:
-        r = requests.get(api_url, timeout=10)
-        if r.status_code == 200 and ':' in r.text.strip():
-            return r.text.strip()
+        r = requests.get(api_url, timeout=15)
+        if r.status_code == 200:
+            text = r.text.strip()
+            if ':' in text and len(text) < 50:
+                return text
     except:
         pass
     return None
 
 def test_proxy(proxy_addr):
-    try:
-        proxies = {"http": f"http://{proxy_addr}", "https": f"http://{proxy_addr}"}
-        return requests.get("http://httpbin.org/ip", proxies=proxies, timeout=8).status_code == 200
-    except:
-        return False
+    """测试代理可用性 - 只测连接速度，毫秒级返回"""
+    proxies = {
+        "http": f"http://{proxy_addr}",
+        "https": f"http://{proxy_addr}"
+    }
+    # ★ 用 HEAD 请求（不下载内容）+ 轻量接口
+    test_urls = [
+        "http://www.baidu.com",
+        "http://www.qq.com",
+    ]
+    for url in test_urls:
+        try:
+            # ★ 关键：用 stream=True + 立即关闭，只测连接和响应头
+            resp = requests.get(
+                url, proxies=proxies, timeout=4,
+                headers={"User-Agent": "Mozilla/5.0",
+                         "Connection": "close"},  # 关键：不保持连接
+                allow_redirects=False,
+                stream=True
+            )
+            # 拿到响应码立即关闭
+            status_ok = resp.status_code in (200, 301, 302)
+            resp.close()
+            if status_ok:
+                return True
+        except:
+            continue
+    return False
+
 
 def safe_request(method, url, log, proxy_api=None, use_proxy=True, **kwargs):
+    """代理请求 - 支持多次重试和自动剔除失败IP"""
     if use_proxy and proxy_api:
-        proxy = fetch_proxy(proxy_api)
-        if proxy and test_proxy(proxy):
-            kwargs['proxies'] = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
-            log(f"  [代理] 使用代理 {proxy}")
+        for attempt in range(3):
+            proxy = fetch_proxy(proxy_api)
+            if not proxy:
+                log(f"  [代理] 第{attempt+1}次获取IP失败")
+                time.sleep(1)
+                continue
+            log(f"  [代理] 第{attempt+1}次测试 {proxy} ...")
+            if test_proxy(proxy):
+                kwargs['proxies'] = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
+                log(f"  [代理] ✅ 使用代理 {proxy}")
+                break
+            else:
+                log(f"  [代理] ❌ {proxy} 不可用，重新获取")
+                time.sleep(0.5)
         else:
-            log("  [代理] 未获取到有效代理，使用直连")
+            log("  [代理] 多次获取均失败，尝试直连")
+
     try:
-        return requests.request(method, url, **kwargs)
+        return requests.request(method, url, timeout=30, **kwargs)
     except requests.exceptions.RequestException as e:
         if use_proxy and proxy_api and 'proxies' in kwargs:
-            log(f"  [代理] 代理失败，尝试更换IP...")
+            log(f"  [代理] 请求失败，尝试更换IP...")
             new_proxy = fetch_proxy(proxy_api)
             if new_proxy and test_proxy(new_proxy):
                 kwargs['proxies'] = {"http": f"http://{new_proxy}", "https": f"http://{new_proxy}"}
+                log(f"  [代理] 换用 {new_proxy} 重试")
                 try:
-                    return requests.request(method, url, **kwargs)
+                    return requests.request(method, url, timeout=30, **kwargs)
                 except:
                     pass
         raise e
+
 
 # ========== 业务函数 ==========
 def step1_get_auth_token(log, token, proxy_api=None, use_proxy=False):
