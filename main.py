@@ -362,7 +362,7 @@ def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None,
                             headers=headers, json=payload, timeout=15, verify=False)
         result = resp.json()
         code = result.get("code")
-        return False, True
+        
         if code == "OK" and result.get("data", {}).get("status") == "pass":
             log("✅ 实名认证通过！")
             return True, False
