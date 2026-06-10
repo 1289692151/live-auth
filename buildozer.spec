@@ -1,9 +1,9 @@
 [app]
-title = 看什么看
+title = 成功
 package.name = liveauth
 package.domain = com.user
 source.dir = .
-version = 1.5
+version = 1.6
 requirements = python3, kivy, requests, pycryptodome, androidstorage4kivy, jnius
 orientation = portrait
 osx.python_version = 3
