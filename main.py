@@ -9,6 +9,7 @@ from Crypto.Util.Padding import pad
 # ========== 字体注册 ==========
 from kivy.core.text import LabelBase
 from kivy.resources import resource_add_path, resource_find
+
 if os.path.exists('font.ttf'):
     font_path = 'font.ttf'
 else:
@@ -30,6 +31,7 @@ HAS_AS4K = False
 if platform == 'android':
     try:
         from androidstorage4kivy import Chooser, SharedStorage
+
         HAS_AS4K = True
     except Exception as e:
         Logger.warning(f"androidstorage4kivy 未安装: {e}")
@@ -80,7 +82,7 @@ COLOR_INPUT_BG = (0.97, 0.97, 0.99, 1)
 COLOR_LOG_BG = (0.12, 0.12, 0.14, 1)
 COLOR_LOG_TEXT = (0.95, 0.95, 0.95, 1)
 
-DEFAULT_PROXY_API = 'http://api.zhiliandaili.cn/traffic/getip?linePoolIndex=1&packid=12&qty=1&time=11&port=1&format=txt&ss=1&dt=0&isp=0&ct=1&uid=51919&usertype=17&accessName=15372328495&accessPassword=01c8fef2b09e2bc25039f1470b730129'
+DEFAULT_PROXY_API = ''
 
 
 # ========== Android URI 复制工具 ==========
@@ -115,7 +117,7 @@ def android_copy_uri_to_local(uri_str):
             pass
 
         cache_dir = activity.getCacheDir().getAbsolutePath()
-        dest_path = os.path.join(cache_dir, f"up_{int(time.time()*1000)}_{file_name}")
+        dest_path = os.path.join(cache_dir, f"up_{int(time.time() * 1000)}_{file_name}")
 
         istream = resolver.openInputStream(parsed_uri)
         bis = BufferedInputStream(istream)
@@ -141,13 +143,16 @@ def android_copy_uri_to_local(uri_str):
 
 # ========== 工具函数 ==========
 def gen_request_id():
-    return str(random.randint(10**18, 10**19-1))
+    return str(random.randint(10 ** 18, 10 ** 19 - 1))
+
 
 def gen_sign_time():
     return time.strftime("%Y%m%d%H%M%S", time.gmtime())
 
+
 def gen_sign_timestamp():
     return str(int(time.time() * 1000))
+
 
 def build_mallex_headers(token):
     return {
@@ -161,13 +166,16 @@ def build_mallex_headers(token):
         "Accept-Encoding": "gzip", "Connection": "Keep-Alive"
     }
 
+
 def rsa_encrypt(data: bytes) -> str:
     pub = RSA.import_key(RSA_PUBLIC_KEY)
     return PKCS1_v1_5.new(pub).encrypt(data).hex().upper()
 
+
 def aes_encrypt(plain, key, iv):
     return AES.new(key.encode("utf-8"), AES.MODE_CBC, iv.encode("utf-8")).encrypt(
         pad(plain, AES.block_size))
+
 
 def encrypt_file(file_path):
     if not os.path.exists(file_path):
@@ -182,6 +190,7 @@ def encrypt_file(file_path):
     dk = "0" + rsa_encrypt(uid.encode("utf-8"))
     return b64, dk, uid
 
+
 def fetch_proxy(api_url):
     """从API获取代理IP"""
     try:
@@ -193,6 +202,7 @@ def fetch_proxy(api_url):
     except:
         pass
     return None
+
 
 def test_proxy(proxy_addr):
     """测试代理可用性 - 只测连接速度，毫秒级返回"""
@@ -231,10 +241,10 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, timeout=30, *
         for attempt in range(3):
             proxy = fetch_proxy(proxy_api)
             if not proxy:
-                log(f"  [代理] 第{attempt+1}次获取IP失败")
+                log(f"  [代理] 第{attempt + 1}次获取IP失败")
                 time.sleep(1)
                 continue
-            log(f"  [代理] 第{attempt+1}次测试 {proxy} ...")
+            log(f"  [代理] 第{attempt + 1}次测试 {proxy} ...")
             if test_proxy(proxy):
                 kwargs['proxies'] = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
                 log(f"  [代理] ✅ 使用代理 {proxy}")
@@ -261,7 +271,6 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, timeout=30, *
         raise e
 
 
-
 # ========== 业务函数 ==========
 def step1_get_auth_token(log, token, proxy_api=None, use_proxy=False):
     log("⏳ 正在获取活体检测授权...")
@@ -277,6 +286,7 @@ def step1_get_auth_token(log, token, proxy_api=None, use_proxy=False):
     except Exception as e:
         log(f"❌ 网络错误：{e}")
         return None
+
 
 def step2_upload_image(log, img_path, auth_token):
     log("⏳ 正在上传人脸图片...")
@@ -303,6 +313,7 @@ def step2_upload_image(log, img_path, auth_token):
         log(f"❌ 网络错误：{e}")
         return False
 
+
 def step3_get_session_id(log, auth_token, proxy_api=None, use_proxy=False):
     log("⏳ 正在获取视频检测指令...")
     payload = {"app_key": APP_KEY, "actions_count": "1", "auth_token": auth_token,
@@ -321,6 +332,7 @@ def step3_get_session_id(log, auth_token, proxy_api=None, use_proxy=False):
     except Exception as e:
         log(f"❌ 网络错误：{e}")
         return None, None
+
 
 def step4_upload_video(log, vid_path, auth_token, session_id):
     log("⏳ 正在上传视频...")
@@ -352,6 +364,7 @@ def step4_upload_video(log, vid_path, auth_token, session_id):
         log(f"❌ 网络错误：{e}")
         return False, None, str(e)
 
+
 def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None, use_proxy=False):
     log("⏳ 正在提交实名认证...")
     headers = build_mallex_headers(login_token)
@@ -362,7 +375,7 @@ def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None,
                             headers=headers, json=payload, timeout=15, verify=False)
         result = resp.json()
         code = result.get("code")
-        
+
         if code == "OK" and result.get("data", {}).get("status") == "pass":
             log("✅ 实名认证通过！")
             return True, False
@@ -375,6 +388,7 @@ def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None,
     except Exception as e:
         log(f"❌ 网络错误：{e}")
         return False, False
+
 
 def step6_find_account(log, login_token, id_card, proxy_api=None, use_proxy=False):
     log("⏳ 正在申请找回身份证...")
@@ -418,7 +432,7 @@ class RoundedButton(Button):
 
     def _update_state(self, *args):
         if self.state == 'down':
-            self._color.rgb = (self._bg_color[0]*0.8, self._bg_color[1]*0.8, self._bg_color[2]*0.8)
+            self._color.rgb = (self._bg_color[0] * 0.8, self._bg_color[1] * 0.8, self._bg_color[2] * 0.8)
         else:
             self._color.rgb = self._bg_color
 
@@ -498,6 +512,36 @@ class MainScreen(BoxLayout):
         self._bg_rect.pos = self.pos
         self._bg_rect.size = self.size
 
+    def _bind_auto_strip(self, text_input):
+        """自动去除输入框中的所有空格（普通空格/全角空格/不间断空格/Tab）"""
+        state = {'busy': False}
+
+        def on_text(instance, value):
+            if state['busy'] or not value:
+                return
+            cleaned = (value.replace(' ', '')
+                       .replace('\u3000', '')  # 全角空格
+                       .replace('\u00a0', '')  # 不间断空格
+                       .replace('\t', ''))  # Tab
+            if cleaned != value:
+                state['busy'] = True
+                # 尽量保持光标位置
+                try:
+                    cursor = instance.cursor_index()
+                    removed = len(value) - len(cleaned)
+                    # 计算光标之前被删除的空格数
+                    removed_before = sum(
+                        1 for c in value[:cursor]
+                        if c in (' ', '\u3000', '\u00a0', '\t')
+                    )
+                    instance.text = cleaned
+                    instance.cursor = max(0, cursor - removed_before)
+                except Exception:
+                    instance.text = cleaned
+                state['busy'] = False
+
+        text_input.bind(text=on_text)
+
     def build_ui(self):
         self._build_header()
         self._build_body()
@@ -505,17 +549,17 @@ class MainScreen(BoxLayout):
 
     def _build_header(self):
         header = BoxLayout(orientation='vertical',
-                          size_hint_y=None, height=dp(56),
-                          padding=[dp(16), dp(8), dp(16), dp(8)])
+                           size_hint_y=None, height=dp(56),
+                           padding=[dp(16), dp(8), dp(16), dp(8)])
         with header.canvas.before:
             Color(*COLOR_PRIMARY)
             self._header_rect = Rectangle(pos=header.pos, size=header.size)
         header.bind(pos=self._update_header_rect, size=self._update_header_rect)
 
         title = Label(text='活体认证助手',
-                     font_size=dp(20), bold=True,
-                     color=(1, 1, 1, 1),
-                     halign='center', valign='middle')
+                      font_size=dp(20), bold=True,
+                      color=(1, 1, 1, 1),
+                      halign='center', valign='middle')
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         header.add_widget(title)
         self.add_widget(header)
@@ -531,7 +575,7 @@ class MainScreen(BoxLayout):
     def _build_body(self):
         body_scroll = ScrollView(size_hint=(1, 0.55), do_scroll_x=False, bar_width=dp(4))
         body = BoxLayout(orientation='vertical',
-                        size_hint_y=None, padding=[dp(10), dp(8)], spacing=dp(8))
+                         size_hint_y=None, padding=[dp(10), dp(8)], spacing=dp(8))
         body.bind(minimum_height=body.setter('height'))
 
         body.add_widget(self._build_user_card())
@@ -553,12 +597,12 @@ class MainScreen(BoxLayout):
 
     def _build_user_card(self):
         card = CardLayout(orientation='vertical',
-                         size_hint_y=None, height=dp(250),
-                         padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
+                          size_hint_y=None, height=dp(250),
+                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
         title = Label(text='📋 认证信息',
-                     font_size=dp(15), bold=True,
-                     color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
-                     halign='left', valign='middle')
+                      font_size=dp(15), bold=True,
+                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
+                      halign='left', valign='middle')
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
@@ -570,6 +614,7 @@ class MainScreen(BoxLayout):
             hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
+        self._bind_auto_strip(self.token_input)
         card.add_widget(self.token_input)
 
         card.add_widget(self._make_field_label('身份证号'))
@@ -580,6 +625,7 @@ class MainScreen(BoxLayout):
             hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
+        self._bind_auto_strip(self.id_card_input)
         card.add_widget(self.id_card_input)
 
         card.add_widget(self._make_field_label('姓名'))
@@ -590,17 +636,18 @@ class MainScreen(BoxLayout):
             hint_text_color=COLOR_TEXT_LIGHT, cursor_color=COLOR_PRIMARY,
             padding=[dp(10), dp(10), dp(10), dp(10)]
         )
+        self._bind_auto_strip(self.name_input)
         card.add_widget(self.name_input)
         return card
 
     def _build_file_card(self):
         card = CardLayout(orientation='vertical',
-                         size_hint_y=None, height=dp(180),
-                         padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
+                          size_hint_y=None, height=dp(180),
+                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
         title = Label(text='📁 文件选择',
-                     font_size=dp(15), bold=True,
-                     color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
-                     halign='left', valign='middle')
+                      font_size=dp(15), bold=True,
+                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
+                      halign='left', valign='middle')
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
@@ -635,12 +682,12 @@ class MainScreen(BoxLayout):
 
     def _build_proxy_card(self):
         card = CardLayout(orientation='vertical',
-                         size_hint_y=None, height=dp(210),
-                         padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
+                          size_hint_y=None, height=dp(210),
+                          padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
         title = Label(text='🌐 代理设置（可选）',
-                     font_size=dp(15), bold=True,
-                     color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
-                     halign='left', valign='middle')
+                      font_size=dp(15), bold=True,
+                      color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
+                      halign='left', valign='middle')
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         card.add_widget(title)
 
@@ -691,7 +738,7 @@ class MainScreen(BoxLayout):
 
     def _build_action_area(self):
         container = BoxLayout(orientation='vertical', size_hint_y=None,
-                            height=dp(70), spacing=dp(6))
+                              height=dp(70), spacing=dp(6))
         self.status_label = Label(
             text='● 状态：准备就绪', color=COLOR_SUCCESS,
             font_size=dp(13), bold=True, size_hint_y=None, height=dp(24),
@@ -710,12 +757,12 @@ class MainScreen(BoxLayout):
 
     def _build_log_area(self):
         log_container = BoxLayout(orientation='vertical',
-                                 size_hint=(1, 0.45),
-                                 padding=[dp(10), dp(4), dp(10), dp(10)])
+                                  size_hint=(1, 0.45),
+                                  padding=[dp(10), dp(4), dp(10), dp(10)])
         log_title = Label(text='📜 认证日志',
-                         font_size=dp(13), bold=True,
-                         color=COLOR_TEXT, size_hint_y=None, height=dp(24),
-                         halign='left', valign='middle')
+                          font_size=dp(13), bold=True,
+                          color=COLOR_TEXT, size_hint_y=None, height=dp(24),
+                          halign='left', valign='middle')
         log_title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         log_container.add_widget(log_title)
 
@@ -728,13 +775,13 @@ class MainScreen(BoxLayout):
         self.log_scroll.bind(pos=self._update_log_rect, size=self._update_log_rect)
 
         self.log_content = Label(text='',
-                                size_hint_y=None,
-                                halign='left', valign='top',
-                                color=COLOR_LOG_TEXT,
-                                font_size=dp(12),
-                                padding=[dp(10), dp(8), dp(10), dp(8)])
+                                 size_hint_y=None,
+                                 halign='left', valign='top',
+                                 color=COLOR_LOG_TEXT,
+                                 font_size=dp(12),
+                                 padding=[dp(10), dp(8), dp(10), dp(8)])
         self.log_content.bind(texture_size=self.log_content.setter('size'),
-                             width=self._update_log_text_size)
+                              width=self._update_log_text_size)
         self.log_scroll.add_widget(self.log_content)
         log_container.add_widget(self.log_scroll)
         self.add_widget(log_container)
@@ -814,7 +861,7 @@ class MainScreen(BoxLayout):
             self.log(f"✅ 图片就绪 ({file_size:.1f}KB)")
         else:
             self.video_path.text = local_path
-            self.log(f"✅ 视频就绪 ({file_size/1024:.1f}MB)")
+            self.log(f"✅ 视频就绪 ({file_size / 1024:.1f}MB)")
 
         if self._waiting_for_video_change and self.current_file_type == 'video':
             self._waiting_for_video_change = False
@@ -850,7 +897,7 @@ class MainScreen(BoxLayout):
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         popup = Popup(title=f"选择{('图片' if file_type == 'image' else '视频')}",
-                     content=content, size_hint=(0.95, 0.9))
+                      content=content, size_hint=(0.95, 0.9))
 
         def on_select(instance):
             if filechooser.selection:
@@ -892,14 +939,14 @@ class MainScreen(BoxLayout):
     def _show_manual_input(self, file_type):
         content = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
         content.add_widget(Label(text=f"请输入{('图片' if file_type == 'image' else '视频')}完整路径:",
-                                size_hint_y=None, height=dp(30)))
+                                 size_hint_y=None, height=dp(30)))
         path_input = TextInput(hint_text='/sdcard/...', multiline=False,
-                              size_hint_y=None, height=dp(40), font_size=dp(13))
+                               size_hint_y=None, height=dp(40), font_size=dp(13))
         content.add_widget(path_input)
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         popup = Popup(title='手动输入路径', content=content,
-                     size_hint=(0.9, None), height=dp(180))
+                      size_hint=(0.9, None), height=dp(180))
 
         def on_confirm(instance):
             if path_input.text.strip():
@@ -920,6 +967,7 @@ class MainScreen(BoxLayout):
         def _update(dt):
             self.log_content.text += msg + "\n"
             self.log_scroll.scroll_y = 0
+
         Clock.schedule_once(_update, 0)
 
     @mainthread
@@ -965,11 +1013,23 @@ class MainScreen(BoxLayout):
     def start_auth(self, instance):
         self._save_proxy_api(self.proxy_api_input.text.strip())
 
-        token = self.token_input.text.strip()
+        def _clean(s):
+            """去除所有空白字符（空格/全角空格/换行/Tab）"""
+            if not s:
+                return ''
+            return (s.replace(' ', '')
+                    .replace('\u3000', '')
+                    .replace('\u00a0', '')
+                    .replace('\t', '')
+                    .replace('\n', '')
+                    .replace('\r', '')
+                    .strip())
+
+        token = _clean(self.token_input.text)
         img = self.image_path.text.strip()
         vid = self.video_path.text.strip()
-        idcard = self.id_card_input.text.strip()
-        name = self.name_input.text.strip()
+        idcard = _clean(self.id_card_input.text)
+        name = _clean(self.name_input.text)
 
         if not all([token, img, vid, idcard, name]):
             self.log("❌ 请填写所有信息并选择文件")
@@ -989,8 +1049,8 @@ class MainScreen(BoxLayout):
         self.log("\n========== 开始认证流程 ==========")
         self.set_status("正在认证...", COLOR_WARN)
         threading.Thread(target=self.run_auth,
-                        args=(token, img, vid, idcard, name, use_proxy, proxy_api),
-                        daemon=True).start()
+                         args=(token, img, vid, idcard, name, use_proxy, proxy_api),
+                         daemon=True).start()
 
     def run_auth(self, token, img, vid, idcard, name, use_proxy, proxy_api):
         try:
@@ -1081,28 +1141,28 @@ class MainScreen(BoxLayout):
 
         info = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(80), spacing=dp(4))
         lbl1 = Label(text=f"当前视频：{os.path.basename(current_video)}",
-                    color=(1, 1, 1, 1), font_size=dp(13),
-                    halign='left', valign='middle')
+                     color=(1, 1, 1, 1), font_size=dp(13),
+                     halign='left', valign='middle')
         lbl1.bind(size=lambda i, v: setattr(i, 'text_size', v))
         info.add_widget(lbl1)
         lbl2 = Label(text=f"要求动作：{action_str}",
-                    color=COLOR_PRIMARY, font_size=dp(14), bold=True,
-                    halign='left', valign='middle')
+                     color=COLOR_PRIMARY, font_size=dp(14), bold=True,
+                     halign='left', valign='middle')
         lbl2.bind(size=lambda i, v: setattr(i, 'text_size', v))
         info.add_widget(lbl2)
         content.add_widget(info)
 
         if error_msg:
             err = Label(text=f"⚠️ 上次失败：{error_msg}",
-                       color=COLOR_DANGER, font_size=dp(12),
-                       size_hint_y=None, height=dp(30),
-                       halign='left', valign='middle')
+                        color=COLOR_DANGER, font_size=dp(12),
+                        size_hint_y=None, height=dp(30),
+                        halign='left', valign='middle')
             err.bind(size=lambda i, v: setattr(i, 'text_size', v))
             content.add_widget(err)
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(10))
         popup = Popup(title='确认视频文件', content=content,
-                     size_hint=(0.9, None), height=dp(230), auto_dismiss=False)
+                      size_hint=(0.9, None), height=dp(230), auto_dismiss=False)
         self._video_popup = popup
 
         def on_continue(instance):
@@ -1243,5 +1303,6 @@ if __name__ == '__main__':
         LiveAuthApp().run()
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         Logger.error(f"App 启动失败: {e}")
