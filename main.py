@@ -1081,7 +1081,7 @@ class MainScreen(BoxLayout):
 
         info = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(80), spacing=dp(4))
         lbl1 = Label(text=f"当前视频：{os.path.basename(current_video)}",
-                    color=COLOR_TEXT, font_size=dp(13),
+                    color=(1, 1, 1, 1), font_size=dp(13),
                     halign='left', valign='middle')
         lbl1.bind(size=lambda i, v: setattr(i, 'text_size', v))
         info.add_widget(lbl1)
@@ -1181,7 +1181,7 @@ class MainScreen(BoxLayout):
         )
         info = Label(
             text=info_text,
-            color=COLOR_TEXT, font_size=dp(13),
+            color=(1, 1, 1, 1), font_size=dp(13),
             halign='left', valign='top'
         )
         info.bind(size=lambda i, v: setattr(i, 'text_size', v))
