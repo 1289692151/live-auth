@@ -210,22 +210,19 @@ def test_proxy(proxy_addr):
         "http": f"http://{proxy_addr}",
         "https": f"http://{proxy_addr}"
     }
-    # ★ 用 HEAD 请求（不下载内容）+ 轻量接口
     test_urls = [
         "http://www.baidu.com",
         "http://www.qq.com",
     ]
     for url in test_urls:
         try:
-            # ★ 关键：用 stream=True + 立即关闭，只测连接和响应头
             resp = requests.get(
                 url, proxies=proxies, timeout=4,
                 headers={"User-Agent": "Mozilla/5.0",
-                         "Connection": "close"},  # 关键：不保持连接
+                         "Connection": "close"},
                 allow_redirects=False,
                 stream=True
             )
-            # 拿到响应码立即关闭
             status_ok = resp.status_code in (200, 301, 302)
             resp.close()
             if status_ok:
@@ -247,10 +244,10 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, timeout=30, *
             log(f"  [代理] 第{attempt + 1}次测试 {proxy} ...")
             if test_proxy(proxy):
                 kwargs['proxies'] = {"http": f"http://{proxy}", "https": f"http://{proxy}"}
-                log(f"  [代理] ✅ 使用代理 {proxy}")
+                log(f"  [代理] 使用代理 {proxy}")
                 break
             else:
-                log(f"  [代理] ❌ {proxy} 不可用，重新获取")
+                log(f"  [代理] {proxy} 不可用，重新获取")
                 time.sleep(0.5)
         else:
             log("  [代理] 多次获取均失败，尝试直连")
@@ -273,27 +270,27 @@ def safe_request(method, url, log, proxy_api=None, use_proxy=True, timeout=30, *
 
 # ========== 业务函数 ==========
 def step1_get_auth_token(log, token, proxy_api=None, use_proxy=False):
-    log("⏳ 正在获取活体检测授权...")
+    log("... 正在获取活体检测授权...")
     try:
         resp = safe_request('GET', URL_AUTH_TOKEN, log, proxy_api, use_proxy,
                             headers=build_mallex_headers(token), timeout=15, verify=False)
         data = resp.json()
         if data.get("code") != "OK":
-            log(f"❌ 授权失败：{data.get('msg')}")
+            log(f"x 授权失败：{data.get('msg')}")
             return None
-        log("✅ 授权成功")
+        log("√ 授权成功")
         return data["data"]
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return None
 
 
 def step2_upload_image(log, img_path, auth_token):
-    log("⏳ 正在上传人脸图片...")
+    log("... 正在上传人脸图片...")
     try:
         b64, dk, _ = encrypt_file(img_path)
     except Exception as e:
-        log(f"❌ 图片处理失败：{e}")
+        log(f"x 图片处理失败：{e}")
         return False
     headers = {"Content-Type": "application/json", "Content-Encoding": "gzip",
                "Data-Key": dk, "User-Agent": "Dalvik/2.1.0"}
@@ -304,18 +301,18 @@ def step2_upload_image(log, img_path, auth_token):
         result = resp.json()
         if result.get("code") == "000000":
             score = result.get("data", {}).get("face_liveness", "未知")
-            log(f"✅ 图片上传成功（活体分数：{score}）")
+            log(f"√ 图片上传成功（活体分数：{score}）")
             return True
         else:
-            log(f"❌ 图片上传失败：{result.get('msg')}")
+            log(f"x 图片上传失败：{result.get('msg')}")
             return False
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return False
 
 
 def step3_get_session_id(log, auth_token, proxy_api=None, use_proxy=False):
-    log("⏳ 正在获取视频检测指令...")
+    log("... 正在获取视频检测指令...")
     payload = {"app_key": APP_KEY, "actions_count": "1", "auth_token": auth_token,
                "platform_type": 2, "security_level": 1}
     try:
@@ -323,23 +320,23 @@ def step3_get_session_id(log, auth_token, proxy_api=None, use_proxy=False):
                             json=payload, timeout=15, verify=False)
         data = resp.json()
         if data.get("code") != "000000":
-            log(f"❌ 获取检测指令失败：{data}")
+            log(f"x 获取检测指令失败：{data}")
             return None, None
         session_id = data["data"]["session_id"]
         actions = data["data"].get("actions", [])
-        log(f"✅ 本次需要做的动作：{', '.join([ACTION_MAP.get(a, a) for a in actions])}")
+        log(f"√ 本次需要做的动作：{', '.join([ACTION_MAP.get(a, a) for a in actions])}")
         return session_id, actions
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return None, None
 
 
 def step4_upload_video(log, vid_path, auth_token, session_id):
-    log("⏳ 正在上传视频...")
+    log("... 正在上传视频...")
     try:
         b64, dk, _ = encrypt_file(vid_path)
     except Exception as e:
-        log(f"❌ 视频处理失败：{e}")
+        log(f"x 视频处理失败：{e}")
         return False, None, str(e)
     headers = {"Content-Type": "application/json", "Content-Encoding": "gzip",
                "Data-Key": dk, "User-Agent": "Dalvik/2.1.0"}
@@ -352,21 +349,21 @@ def step4_upload_video(log, vid_path, auth_token, session_id):
             av = result.get("data", {}).get("action_verify", "")
             score = result.get("data", {}).get("score", 0)
             if av == "pass":
-                log(f"✅ 视频验证通过（动作完成度：{score}）")
+                log(f"√ 视频验证通过（动作完成度：{score}）")
                 return True, av, ""
             else:
-                log(f"⚠️ 视频中动作未通过。动作完成度 {score} 过低")
+                log(f"! 视频中动作未通过。动作完成度 {score} 过低")
                 return True, av, f"动作完成度 {score} 过低"
         else:
-            log(f"❌ 视频上传失败：{result.get('msg')}")
+            log(f"x 视频上传失败：{result.get('msg')}")
             return False, None, result.get('msg', '')
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return False, None, str(e)
 
 
 def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None, use_proxy=False):
-    log("⏳ 正在提交实名认证...")
+    log("... 正在提交实名认证...")
     headers = build_mallex_headers(login_token)
     headers["Content-Type"] = "application/json"
     payload = {"idCard": id_card, "realName": real_name}
@@ -377,21 +374,21 @@ def step5_submit_real_name(log, login_token, id_card, real_name, proxy_api=None,
         code = result.get("code")
 
         if code == "OK" and result.get("data", {}).get("status") == "pass":
-            log("✅ 实名认证通过！")
+            log("√ 实名认证通过！")
             return True, False
         elif code == "REAL_NAME_AUTH_OTHER":
-            log("⚠️ 该身份证已被其他账号绑定，需要找回")
+            log("! 该身份证已被其他账号绑定，需要找回")
             return False, True
         else:
-            log(f"❌ 实名认证失败：{result.get('msg')}")
+            log(f"x 实名认证失败：{result.get('msg')}")
             return False, False
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return False, False
 
 
 def step6_find_account(log, login_token, id_card, proxy_api=None, use_proxy=False):
-    log("⏳ 正在申请找回身份证...")
+    log("... 正在申请找回身份证...")
     headers = build_mallex_headers(login_token)
     headers["Content-Type"] = "application/json"
     payload = {"idCard": id_card, "liveAuthPassed": 1, "defineCondition": "createNew", "defined": "yes"}
@@ -400,13 +397,13 @@ def step6_find_account(log, login_token, id_card, proxy_api=None, use_proxy=Fals
                             headers=headers, json=payload, timeout=15, verify=False)
         result = resp.json()
         if result.get("code") == "OK" and result.get("data") == True:
-            log("✅ 找回成功！")
+            log("√ 找回成功！")
             return True
         else:
-            log(f"❌ 找回失败：{result.get('msg')}")
+            log(f"x 找回失败：{result.get('msg')}")
             return False
     except Exception as e:
-        log(f"❌ 网络错误：{e}")
+        log(f"x 网络错误：{e}")
         return False
 
 
@@ -464,7 +461,6 @@ class MainScreen(BoxLayout):
         self._waiting_for_video_change = False
         self._pending_video_action = ""
         self._pending_video_error = ""
-        # ★ 新增：找回确认弹窗相关
         self._find_event = threading.Event()
         self._find_agreed = False
         self._find_popup = None
@@ -496,7 +492,7 @@ class MainScreen(BoxLayout):
     def _save_proxy_api(self, api_url):
         try:
             self.store.put('proxy_api', url=api_url)
-            self.log(f"💾 已保存代理API配置")
+            self.log(f"[保存] 已保存代理API配置")
         except Exception as e:
             Logger.error(f"保存代理API失败: {e}")
 
@@ -520,16 +516,13 @@ class MainScreen(BoxLayout):
             if state['busy'] or not value:
                 return
             cleaned = (value.replace(' ', '')
-                       .replace('\u3000', '')  # 全角空格
-                       .replace('\u00a0', '')  # 不间断空格
-                       .replace('\t', ''))  # Tab
+                       .replace('\u3000', '')
+                       .replace('\u00a0', '')
+                       .replace('\t', ''))
             if cleaned != value:
                 state['busy'] = True
-                # 尽量保持光标位置
                 try:
                     cursor = instance.cursor_index()
-                    removed = len(value) - len(cleaned)
-                    # 计算光标之前被删除的空格数
                     removed_before = sum(
                         1 for c in value[:cursor]
                         if c in (' ', '\u3000', '\u00a0', '\t')
@@ -599,7 +592,7 @@ class MainScreen(BoxLayout):
         card = CardLayout(orientation='vertical',
                           size_hint_y=None, height=dp(250),
                           padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-        title = Label(text='📋 认证信息',
+        title = Label(text='认证信息',
                       font_size=dp(15), bold=True,
                       color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
                       halign='left', valign='middle')
@@ -644,7 +637,7 @@ class MainScreen(BoxLayout):
         card = CardLayout(orientation='vertical',
                           size_hint_y=None, height=dp(180),
                           padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-        title = Label(text='📁 文件选择',
+        title = Label(text='文件选择',
                       font_size=dp(15), bold=True,
                       color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
                       halign='left', valign='middle')
@@ -684,7 +677,7 @@ class MainScreen(BoxLayout):
         card = CardLayout(orientation='vertical',
                           size_hint_y=None, height=dp(210),
                           padding=[dp(12), dp(10), dp(12), dp(10)], spacing=dp(8))
-        title = Label(text='🌐 代理设置（可选）',
+        title = Label(text='代理设置（可选）',
                       font_size=dp(15), bold=True,
                       color=COLOR_PRIMARY, size_hint_y=None, height=dp(28),
                       halign='left', valign='middle')
@@ -705,7 +698,7 @@ class MainScreen(BoxLayout):
         card.add_widget(self.proxy_api_input)
 
         self.btn_get_proxy = RoundedButton(
-            text='🔄 获取代理IP', bg_color=COLOR_WARN,
+            text='获取代理IP', bg_color=COLOR_WARN,
             size_hint_y=None, height=dp(36)
         )
         self.btn_get_proxy.bind(on_press=self.on_get_proxy)
@@ -748,7 +741,7 @@ class MainScreen(BoxLayout):
         container.add_widget(self.status_label)
 
         self.btn_start = RoundedButton(
-            text='🚀 开始认证', bg_color=COLOR_SUCCESS,
+            text='开始认证', bg_color=COLOR_SUCCESS,
             size_hint_y=None, height=dp(44), font_size=dp(16)
         )
         self.btn_start.bind(on_press=self.start_auth)
@@ -759,7 +752,7 @@ class MainScreen(BoxLayout):
         log_container = BoxLayout(orientation='vertical',
                                   size_hint=(1, 0.45),
                                   padding=[dp(10), dp(4), dp(10), dp(10)])
-        log_title = Label(text='📜 认证日志',
+        log_title = Label(text='认证日志',
                           font_size=dp(13), bold=True,
                           color=COLOR_TEXT, size_hint_y=None, height=dp(24),
                           halign='left', valign='middle')
@@ -800,7 +793,7 @@ class MainScreen(BoxLayout):
     # ========== 文件选择 ==========
     def pick_file(self, file_type):
         self.current_file_type = file_type
-        self.log(f"⏳ 正在打开{('图片' if file_type == 'image' else '视频')}选择器...")
+        self.log(f"... 正在打开{('图片' if file_type == 'image' else '视频')}选择器...")
         if platform == 'android':
             self._android_pick_file(file_type)
         else:
@@ -815,18 +808,18 @@ class MainScreen(BoxLayout):
                 else:
                     chooser.choose_content("video/*")
             else:
-                self.log("❌ 未安装 androidstorage4kivy")
+                self.log("x 未安装 androidstorage4kivy")
                 self._show_manual_input(file_type)
         except Exception as e:
-            self.log(f"❌ 打开文件选择器失败: {e}")
+            self.log(f"x 打开文件选择器失败: {e}")
             self._show_manual_input(file_type)
 
     def _handle_chooser_result(self, uri_list):
         if not uri_list:
-            self.log("❌ 未选择文件")
+            self.log("x 未选择文件")
             return
         uri = uri_list[0] if isinstance(uri_list, list) else uri_list
-        self.log("⏳ 正在复制文件到本地...")
+        self.log("... 正在复制文件到本地...")
 
         def _do_copy():
             try:
@@ -849,7 +842,7 @@ class MainScreen(BoxLayout):
     @mainthread
     def _on_file_ready(self, local_path):
         if not local_path or not os.path.exists(local_path):
-            self.log("❌ 文件复制失败")
+            self.log("x 文件复制失败")
             self._reset_video_change_state()
             return
         try:
@@ -858,10 +851,10 @@ class MainScreen(BoxLayout):
             file_size = 0
         if self.current_file_type == 'image':
             self.image_path.text = local_path
-            self.log(f"✅ 图片就绪 ({file_size:.1f}KB)")
+            self.log(f"√ 图片就绪 ({file_size:.1f}KB)")
         else:
             self.video_path.text = local_path
-            self.log(f"✅ 视频就绪 ({file_size / 1024:.1f}MB)")
+            self.log(f"√ 视频就绪 ({file_size / 1024:.1f}MB)")
 
         if self._waiting_for_video_change and self.current_file_type == 'video':
             self._waiting_for_video_change = False
@@ -875,7 +868,7 @@ class MainScreen(BoxLayout):
 
     @mainthread
     def _on_file_error(self, err):
-        self.log(f"❌ 文件错误: {err}")
+        self.log(f"x 文件错误: {err}")
         self._reset_video_change_state()
 
     def _reset_video_change_state(self):
@@ -921,10 +914,10 @@ class MainScreen(BoxLayout):
             path = path[0]
         if self.current_file_type == 'image':
             self.image_path.text = path
-            self.log(f"✅ 已选择图片: {os.path.basename(path)}")
+            self.log(f"√ 已选择图片: {os.path.basename(path)}")
         else:
             self.video_path.text = path
-            self.log(f"✅ 已选择视频: {os.path.basename(path)}")
+            self.log(f"√ 已选择视频: {os.path.basename(path)}")
 
         if self._waiting_for_video_change and self.current_file_type == 'video':
             self._waiting_for_video_change = False
@@ -984,10 +977,10 @@ class MainScreen(BoxLayout):
     def on_get_proxy(self, instance):
         api_url = self.proxy_api_input.text.strip()
         if not api_url:
-            self.log("❌ 请输入代理API地址")
+            self.log("x 请输入代理API地址")
             return
         self._save_proxy_api(api_url)
-        self.log("⏳ 正在获取代理IP...")
+        self.log("... 正在获取代理IP...")
         self.btn_get_proxy.disabled = True
 
         def _get():
@@ -995,16 +988,16 @@ class MainScreen(BoxLayout):
             if proxy:
                 if test_proxy(proxy):
                     self.proxy_addr = proxy
-                    self.set_proxy_status(f"✅ {proxy}", COLOR_SUCCESS)
-                    self.log(f"✅ 获取代理成功：{proxy}")
+                    self.set_proxy_status(f"√ {proxy}", COLOR_SUCCESS)
+                    self.log(f"√ 获取代理成功：{proxy}")
                 else:
                     self.proxy_addr = None
-                    self.set_proxy_status("❌ 代理无效", COLOR_DANGER)
-                    self.log("❌ 代理无效，请更换API")
+                    self.set_proxy_status("x 代理无效", COLOR_DANGER)
+                    self.log("x 代理无效，请更换API")
             else:
                 self.proxy_addr = None
-                self.set_proxy_status("❌ 获取失败", COLOR_DANGER)
-                self.log("❌ 获取代理失败")
+                self.set_proxy_status("x 获取失败", COLOR_DANGER)
+                self.log("x 获取代理失败")
             self.btn_get_proxy.disabled = False
 
         threading.Thread(target=_get, daemon=True).start()
@@ -1014,7 +1007,6 @@ class MainScreen(BoxLayout):
         self._save_proxy_api(self.proxy_api_input.text.strip())
 
         def _clean(s):
-            """去除所有空白字符（空格/全角空格/换行/Tab）"""
             if not s:
                 return ''
             return (s.replace(' ', '')
@@ -1032,15 +1024,15 @@ class MainScreen(BoxLayout):
         name = _clean(self.name_input.text)
 
         if not all([token, img, vid, idcard, name]):
-            self.log("❌ 请填写所有信息并选择文件")
+            self.log("x 请填写所有信息并选择文件")
             self.set_status("信息不完整", COLOR_DANGER)
             return
 
         if not os.path.exists(img):
-            self.log(f"❌ 图片文件不存在: {img}")
+            self.log(f"x 图片文件不存在: {img}")
             return
         if not os.path.exists(vid):
-            self.log(f"❌ 视频文件不存在: {vid}")
+            self.log(f"x 视频文件不存在: {vid}")
             return
 
         use_proxy = self.use_proxy_check.active
@@ -1069,7 +1061,7 @@ class MainScreen(BoxLayout):
                     return
                 action_desc = [ACTION_MAP.get(a, a) for a in actions] if actions else []
                 action_str = ', '.join(action_desc) if action_desc else "无特定动作"
-                self.log(f"📢 视频需包含动作：{action_str}")
+                self.log(f"> 视频需包含动作：{action_str}")
 
                 confirmed, new_vid = self.ask_user_for_video(action_str, vid, self.last_video_error)
                 if not confirmed:
@@ -1088,32 +1080,30 @@ class MainScreen(BoxLayout):
                     break
                 else:
                     self.last_video_error = err_msg
-                    self.log("🔄 动作未通过，将重新获取指令并重试...")
+                    self.log("> 动作未通过，将重新获取指令并重试...")
                     time.sleep(1)
 
             success, need_find = step5_submit_real_name(self.log, token, idcard, name, proxy_api, use_proxy)
             if success:
-                self.set_status("✅ 实名认证通过", COLOR_SUCCESS)
-                self.log("🎉 恭喜！实名认证全部完成")
+                self.set_status("√ 实名认证通过", COLOR_SUCCESS)
+                self.log("★ 恭喜！实名认证全部完成")
             elif need_find:
-                # ★ 修改：先弹确认框让用户选择
                 agreed = self.ask_user_for_find(idcard)
                 if not agreed:
                     self.set_status("已取消找回", COLOR_WARN)
-                    self.log("⚠️ 用户取消找回身份证")
+                    self.log("! 用户取消找回身份证")
                     return
-                # 同意后才执行找回
                 if step6_find_account(self.log, token, idcard, proxy_api, use_proxy):
-                    self.set_status("✅ 找回成功", COLOR_SUCCESS)
-                    self.log("🎉 找回并认证成功！")
+                    self.set_status("√ 找回成功", COLOR_SUCCESS)
+                    self.log("★ 找回并认证成功！")
                 else:
-                    self.set_status("❌ 找回失败", COLOR_DANGER)
-                    self.log("⚠️ 请稍后重试找回步骤")
+                    self.set_status("x 找回失败", COLOR_DANGER)
+                    self.log("! 请稍后重试找回步骤")
             else:
-                self.set_status("❌ 实名认证失败", COLOR_DANGER)
-                self.log("❌ 认证失败，请检查日志")
+                self.set_status("x 实名认证失败", COLOR_DANGER)
+                self.log("x 认证失败，请检查日志")
         except Exception as e:
-            self.log(f"❌ 程序异常：{e}")
+            self.log(f"x 程序异常：{e}")
             self.set_status("程序异常", COLOR_DANGER)
         finally:
             self.btn_start.disabled = False
@@ -1153,7 +1143,7 @@ class MainScreen(BoxLayout):
         content.add_widget(info)
 
         if error_msg:
-            err = Label(text=f"⚠️ 上次失败：{error_msg}",
+            err = Label(text=f"! 上次失败：{error_msg}",
                         color=COLOR_DANGER, font_size=dp(12),
                         size_hint_y=None, height=dp(30),
                         halign='left', valign='middle')
@@ -1199,9 +1189,8 @@ class MainScreen(BoxLayout):
         content.add_widget(btn_box)
         popup.open()
 
-    # ★ 新增：找回身份证确认弹窗
+    # ========== 找回身份证确认弹窗 ==========
     def ask_user_for_find(self, id_card):
-        """弹窗询问用户是否同意找回身份证，同意返回 True"""
         self._find_event.clear()
         self._find_agreed = False
         Clock.schedule_once(lambda dt: self._show_find_popup(id_card), 0)
@@ -1210,8 +1199,7 @@ class MainScreen(BoxLayout):
 
     @mainthread
     def _show_find_popup(self, id_card):
-        self.log("🔔 准备弹出找回确认窗口")
-        # 防止重复弹窗
+        self.log("[提示] 准备弹出找回确认窗口")
         if self._find_popup:
             try:
                 self._find_popup.dismiss(force=True)
@@ -1221,9 +1209,8 @@ class MainScreen(BoxLayout):
 
         content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
 
-        # 标题
         title = Label(
-            text="⚠️ 身份证已被占用",
+            text="! 身份证已被占用",
             color=COLOR_WARN, font_size=dp(16), bold=True,
             size_hint_y=None, height=dp(30),
             halign='center', valign='middle'
@@ -1231,7 +1218,6 @@ class MainScreen(BoxLayout):
         title.bind(size=lambda i, v: setattr(i, 'text_size', v))
         content.add_widget(title)
 
-        # 提示信息
         masked_id = id_card[:6] + "********" + id_card[-4:] if len(id_card) >= 10 else id_card
         info_text = (
             f"身份证号 {masked_id} 已被其他账号绑定。\n\n"
@@ -1247,7 +1233,6 @@ class MainScreen(BoxLayout):
         info.bind(size=lambda i, v: setattr(i, 'text_size', v))
         content.add_widget(info)
 
-        # 按钮
         btn_box = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(12))
         popup = Popup(
             title='找回身份证确认',
