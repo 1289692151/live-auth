@@ -16,28 +16,26 @@ jobs:
       - name: 还原 keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          SIZE=$(stat -c%s release.keystore)
-          echo "✅ keystore 大小: $SIZE bytes"
-          if [ "$SIZE" -lt 1024 ]; then
-            echo "❌ keystore 文件太小，base64 损坏"
-            exit 1
-          fi
+          ls -la release.keystore
 
-      - name: 注入 Secrets 密码
+      - name: 强制使用我们的 keystore
         run: |
+          sed -i 's/^android.release = True/# android.release = True/' buildozer.spec
           sed -i "s|android.keystore = .*|android.keystore = /home/runner/work/live-auth/live-auth/release.keystore|" buildozer.spec
-          sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
-          sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
-          sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
-          echo "📄 当前签名配置："
-          grep "android.keystore\|android.key" buildozer.spec
+          sed -i "s|android.keystore_passwd = .*|android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}|" buildozer.spec
+          sed -i "s|android.keyalias = .*|android.keyalias = ${{ secrets.KEY_ALIAS }}|" buildozer.spec
+          sed -i "s|android.keypasswd = .*|android.keypasswd = ${{ secrets.KEY_PASS }}|" buildozer.spec
+          mkdir -p bin
+          cp release.keystore bin/release.keystore
+          echo "=== 签名配置 ==="
+          grep -E "android\.(keystore|key|release)" buildozer.spec
 
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 检查磁盘 + 增加 swap
+      - name: 检查磁盘 + swap
         run: |
           df -h
           sudo apt-get clean
@@ -52,40 +50,34 @@ jobs:
       - name: 安装系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
-          sudo apt-get install -y unzip git zip zlib1g-dev
+          sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk unzip git zip zlib1g-dev
 
       - name: 安装 buildozer
         run: |
           python -m pip install --upgrade pip
           python -m pip install buildozer cython==0.29.33
 
-
-      - name: 打包（debug 模式 + 自定义签名）
+      - name: 打包
         run: buildozer -v android debug 2>&1 | tee build.log
 
-      - name: 强制 APK（删除 AAB）
+      - name: 验证 APK 签名
         if: always()
         run: |
           rm -f bin/*.aab
-          if ls bin/*.apk 2>/dev/null; then
-            APK=$(ls bin/*.apk | head -1)
-            echo "✅ 找到 APK: $APK"
-            echo "🔏 验证签名："
-            jarsigner -verify -verbose:summary -certs "$APK" 2>&1 | grep -E "CN=|warning" | head -3
-          else
-            echo "❌ 没找到 APK！"
+          if ! ls bin/*.apk 2>/dev/null; then
+            echo "❌ 没找到 APK"
             ls -la bin/ 2>/dev/null
+            exit 1
           fi
-
-      - name: 检查产物
-        if: always()
-        run: |
-          echo "=== bin 目录 ==="
-          ls -laR bin/ 2>/dev/null || echo "❌ bin 不存在"
-          echo ""
-          echo "=== build.log 末尾 ==="
-          tail -30 build.log 2>/dev/null
+          APK=$(ls bin/*.apk | head -1)
+          echo "🔏 验证签名：$APK"
+          CN=$(jarsigner -verify -verbose:summary -certs "$APK" 2>&1 | grep -oE "CN=[^,]+" | head -1)
+          echo "签名: $CN"
+          if echo "$CN" | grep -q "Android Debug"; then
+            echo "❌❌❌ APK 用的是 Android Debug 临时签名！"
+            exit 1
+          fi
+          echo "✅ 签名正确"
 
       - name: 上传 APK
         if: success()
@@ -106,4 +98,4 @@ jobs:
 
       - name: 清理
         if: always()
-        run: rm -f release.keystore
+        run: rm -f release.keystore bin/release.keystore
