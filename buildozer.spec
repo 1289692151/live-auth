@@ -12,14 +12,19 @@ android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, R
 android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.archs = arm64-v8a
+android.archs = arm64-v8a, armeabi-v7a             ← 改：加 32 位
 android.accept_sdk_license = True
 android.build_tools_version = 33.0.0
 android.allow_backup = True
 android.logcat_filters = *:S python:D
 source.include_exts = py,png,jpg,kv,atlas,ttf
-android.release = True
+# android.release = True                            ← 改：注释掉
+
+# 签名
 android.keystore = %(source.dir)s/release.keystore
 android.keystore_passwd = mallex2026
 android.keyalias = mallex
 android.keypasswd = mallex2026
+
+# 网络配置（允许 HTTP）
+android.network_security_config = %(source.dir)s/network_security_config.xml    ← 改：新增
