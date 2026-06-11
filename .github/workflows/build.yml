@@ -1,10 +1,10 @@
 name: Build APK
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:    # 手动触发
   push:
     tags:
-      - 'v*'
+      - 'v*'            # 推送 v 开头的 tag 也自动打包
 
 jobs:
   build:
@@ -13,75 +13,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 还原 keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          ls -la release.keystore
-
-      - name: 注入 Secrets 密码
-        run: |
-          sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
-          sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
-          sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
-          grep "android.keystore\|android.key" buildozer.spec
-
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 检查磁盘 + 增加 swap
+      - name: 还原 keystore
         run: |
-          df -h
-          sudo apt-get clean
-          sudo swapoff /swapfile 2>/dev/null || true
-          sudo rm -f /swapfile
-          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          echo "keystore 大小：$(stat -c%s release.keystore) bytes"
+          ls -la release.keystore
+
+      - name: 替换签名密码为占位符
+        run: |
+          # 把 buildozer.spec 里的明文密码替换成 Secrets 注入的
+          sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
+          sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
+          sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
+          grep "android.keystore" buildozer.spec
 
       - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
-          sudo apt-get install -y unzip git zip zlib1g-dev
 
       - name: 安装 buildozer
         run: |
           pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
           pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer cython==0.29.33
 
-      - name: 打包（debug 模式 + 自定义签名）
-        run: buildozer -v android debug 2>&1 | tee build.log
-
-      - name: 检查产物
-        if: always()
-        run: |
-          echo "=== bin 目录 ==="
-          ls -laR bin/ 2>/dev/null || echo "❌ bin 目录不存在"
-          echo ""
-          echo "=== build.log 末尾 ==="
-          tail -30 build.log 2>/dev/null
+      - name: 打包 release APK
+        run: buildozer -v android release 2>&1 | tee build.log
 
       - name: 上传 APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: liveauth-apk
+          name: liveauth-release-${{ github.ref_name }}
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 30
 
-      - name: 上传 build.log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
-          retention-days: 7
-
-      - name: 清理
+      - name: 清理密钥（防止泄露）
         if: always()
         run: rm -f release.keystore
