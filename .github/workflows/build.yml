@@ -55,10 +55,11 @@ jobs:
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
           sudo apt-get install -y unzip git zip zlib1g-dev
 
-      - name: 安装 buildozer
+      -      - name: 安装 buildozer
         run: |
-          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
-          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer cython==0.29.33
+          python -m pip install --upgrade pip
+          python -m pip install buildozer cython==0.29.33
+
 
       - name: 打包（debug 模式 + 自定义签名）
         run: buildozer -v android debug 2>&1 | tee build.log
