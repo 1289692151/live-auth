@@ -1,23 +1,58 @@
 name: Build APK
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:    # 手动触发
+  push:
+    tags:
+      - 'v*'            # 推送 v 开头的 tag 也自动打包
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python
+
+      - name: 设置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
-      - name: Install dependencies
+          python-version: '3.10'
+
+      - name: 还原 keystore
         run: |
-          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          echo "keystore 大小：$(stat -c%s release.keystore) bytes"
+          ls -la release.keystore
+
+      - name: 替换签名密码为占位符
+        run: |
+          # 把 buildozer.spec 里的明文密码替换成 Secrets 注入的
+          sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
+          sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
+          sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
+          grep "android.keystore" buildozer.spec
+
+      - name: 安装依赖
+        run: |
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
-      - name: Build APK
-        run: buildozer -v android debug
-      - name: Upload APK
+
+      - name: 安装 buildozer
+        run: |
+          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
+          pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer cython==0.29.33
+
+      - name: 打包 release APK
+        run: buildozer -v android release 2>&1 | tee build.log
+
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: liveauth-debug
+          name: liveauth-release-${{ github.ref_name }}
           path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 清理密钥（防止泄露）
+        if: always()
+        run: rm -f release.keystore
