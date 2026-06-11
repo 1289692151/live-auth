@@ -32,15 +32,21 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 增加 swap（防止 OOM）
+      - name: 检查磁盘 + 增加 swap
         run: |
-          sudo fallocate -l 4G /swapfile
+          df -h
+          sudo apt-get clean
+          # 清理可能存在的旧 swap
+          sudo swapoff /swapfile 2>/dev/null || true
+          sudo rm -f /swapfile
+          # 创建 4G swap
+          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: 安装依赖
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
@@ -54,11 +60,12 @@ jobs:
       - name: 打包 release APK
         run: buildozer -v android release 2>&1 | tee build.log
 
-      - name: 检查 bin 目录
+      - name: 检查产物
         if: always()
         run: |
           echo "=== bin 目录内容 ==="
-          ls -la bin/ 2>/dev/null || echo "❌ bin 目录不存在"
+          ls -laR bin/ 2>/dev/null || echo "❌ bin 目录不存在"
+          echo ""
           echo "=== build.log 最后 50 行 ==="
           tail -50 build.log 2>/dev/null || echo "❌ build.log 不存在"
 
@@ -71,7 +78,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: 上传 build.log（方便排查）
+      - name: 上传 build.log
         if: always()
         uses: actions/upload-artifact@v4
         with:
