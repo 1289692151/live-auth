@@ -57,8 +57,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython==0.29.33
 
-      - name: 打包
-        run: buildozer -v android debug 2>&1 | tee build.log
+      - name: 打包（release 模式）
+        run: |
+          # 先确保 spec 启用 release
+          sed -i 's/^# android.release = True/android.release = True/' buildozer.spec
+          buildozer -v android release 2>&1 | tee build.log
+
 
       - name: 验证 APK 签名
         if: always()
