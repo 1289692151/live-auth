@@ -16,18 +16,23 @@ jobs:
       - name: 还原 keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          ls -la release.keystore
+          SIZE=$(stat -c%s release.keystore)
+          echo "✅ keystore 大小: $SIZE bytes"
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "❌ keystore 文件太小"
+            exit 1
+          fi
 
       - name: 强制使用我们的 keystore
         run: |
+          # 注释掉 release 模式（用 debug 模式输出 APK）
           sed -i 's/^android.release = True/# android.release = True/' buildozer.spec
+          # 强制设置 keystore 绝对路径
           sed -i "s|android.keystore = .*|android.keystore = /home/runner/work/live-auth/live-auth/release.keystore|" buildozer.spec
           sed -i "s|android.keystore_passwd = .*|android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}|" buildozer.spec
           sed -i "s|android.keyalias = .*|android.keyalias = ${{ secrets.KEY_ALIAS }}|" buildozer.spec
           sed -i "s|android.keypasswd = .*|android.keypasswd = ${{ secrets.KEY_PASS }}|" buildozer.spec
-          mkdir -p bin
-          cp release.keystore bin/release.keystore
-          echo "=== 签名配置 ==="
+          echo "=== 当前签名配置 ==="
           grep -E "android\.(keystore|key|release)" buildozer.spec
 
       - name: 设置 Python
@@ -57,31 +62,89 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython==0.29.33
 
-      - name: 打包（release 模式）
+      - name: 打包（debug 模式 + 自动重试 5 次）
         run: |
-          # 先确保 spec 启用 release
-          sed -i 's/^# android.release = True/android.release = True/' buildozer.spec
-          buildozer -v android release 2>&1 | tee build.log
+          for i in 1 2 3 4 5; do
+            echo "============================================"
+            echo "=== 打包尝试 $i / 5 ==="
+            echo "============================================"
+            
+            # 清理半下载文件
+            rm -rf .buildozer/android/platform/build-*/dists/*/libs 2>/dev/null
+            
+            if buildozer -v android debug 2>&1 | tee build.log; then
+              echo "✅ 第 $i 次尝试成功"
+              break
+            fi
+            echo "❌ 第 $i 次失败"
+            if [ $i -lt 5 ]; then
+              WAIT=$((30 * i))
+              echo "等待 $WAIT 秒后重试..."
+              sleep $WAIT
+            fi
+          done
+          
+          if ! ls bin/*.apk 2>/dev/null; then
+            echo "❌ 5 次都失败，没生成 APK"
+            tail -50 build.log
+            exit 1
+          fi
 
-
-      - name: 验证 APK 签名
+      - name: 重新签名（用我们的 keystore）
         if: always()
         run: |
-          rm -f bin/*.aab
-          if ! ls bin/*.apk 2>/dev/null; then
+          APK=$(ls bin/*.apk 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
             echo "❌ 没找到 APK"
-            ls -la bin/ 2>/dev/null
             exit 1
           fi
-          APK=$(ls bin/*.apk | head -1)
-          echo "🔏 验证签名：$APK"
-          CN=$(jarsigner -verify -verbose:summary -certs "$APK" 2>&1 | grep -oE "CN=[^,]+" | head -1)
+          echo "原始 APK: $APK"
+          
+          # 找 apksigner
+          APKSIGNER=$(find / -name "apksigner" 2>/dev/null | grep -v "Permission denied" | head -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "❌ 找不到 apksigner"
+            exit 1
+          fi
+          echo "apksigner: $APKSIGNER"
+          
+          # 删除 buildozer 加的 debug 签名
+          zip -d "$APK" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.DSA' 2>/dev/null
+          
+          # 用我们的 keystore 重新签
+          $APKSIGNER sign \
+            --ks /home/runner/work/live-auth/live-auth/release.keystore \
+            --ks-pass pass:${{ secrets.KEYSTORE_PASS }} \
+            --key-pass pass:${{ secrets.KEY_PASS }} \
+            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
+            --out "$APK.signed" \
+            "$APK"
+          
+          # 替换
+          mv "$APK.signed" "$APK"
+          echo "✅ 重新签名完成"
+          
+          # 验证
+          $APKSIGNER verify --print-certs "$APK" 2>&1 | head -3
+
+      - name: 验证签名
+        if: always()
+        run: |
+          APK=$(ls bin/*.apk 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ 没 APK"
+            exit 1
+          fi
+          
+          APKSIGNER=$(find / -name "apksigner" 2>/dev/null | grep -v "Permission denied" | head -1)
+          CN=$($APKSIGNER verify --print-certs "$APK" 2>&1 | grep -oE "CN=[^,]+" | head -1)
           echo "签名: $CN"
+          
           if echo "$CN" | grep -q "Android Debug"; then
-            echo "❌❌❌ APK 用的是 Android Debug 临时签名！"
+            echo "❌❌❌ 还是 Android Debug 签名"
             exit 1
           fi
-          echo "✅ 签名正确"
+          echo "✅ 签名正确: $CN"
 
       - name: 上传 APK
         if: success()
