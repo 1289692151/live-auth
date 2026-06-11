@@ -1,0 +1,5 @@
+release.keystore
+*.keystore
+*.keystore.b64
+bin/
+.buildozer/
