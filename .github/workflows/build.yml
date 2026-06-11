@@ -17,14 +17,12 @@ jobs:
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
           ls -la release.keystore
-          echo "✅ keystore 已还原"
 
-      - name: 替换签名密码为 Secrets
+      - name: 注入 Secrets 密码
         run: |
           sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
           sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
           sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
-          echo "📄 当前签名配置："
           grep "android.keystore\|android.key" buildozer.spec
 
       - name: 设置 Python
@@ -36,17 +34,15 @@ jobs:
         run: |
           df -h
           sudo apt-get clean
-          # 清理可能存在的旧 swap
           sudo swapoff /swapfile 2>/dev/null || true
           sudo rm -f /swapfile
-          # 创建 4G swap
-          sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: 安装系统依赖
+      - name: 安装依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
@@ -57,23 +53,23 @@ jobs:
           pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --upgrade pip
           pip install -i https://pypi.tuna.tsinghua.edu.cn/simple buildozer cython==0.29.33
 
-      - name: 打包 release APK
-        run: buildozer -v android release 2>&1 | tee build.log
+      - name: 打包（debug 模式 + 自定义签名）
+        run: buildozer -v android debug 2>&1 | tee build.log
 
       - name: 检查产物
         if: always()
         run: |
-          echo "=== bin 目录内容 ==="
+          echo "=== bin 目录 ==="
           ls -laR bin/ 2>/dev/null || echo "❌ bin 目录不存在"
           echo ""
-          echo "=== build.log 最后 50 行 ==="
-          tail -50 build.log 2>/dev/null || echo "❌ build.log 不存在"
+          echo "=== build.log 末尾 ==="
+          tail -30 build.log 2>/dev/null
 
       - name: 上传 APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: liveauth-release-${{ github.ref_name }}
+          name: liveauth-apk
           path: bin/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -86,6 +82,6 @@ jobs:
           path: build.log
           retention-days: 7
 
-      - name: 清理密钥
+      - name: 清理
         if: always()
         run: rm -f release.keystore
