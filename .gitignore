@@ -1,5 +1,52 @@
+# ============ Keystore ============
 release.keystore
 *.keystore
 *.keystore.b64
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+
+# ============ Buildozer / Android ============
 bin/
 .buildozer/
+*.apk
+*.ap_
+*.dex
+*.class
+*.iml
+
+# ============ IDE / Editor ============
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ============ Virtual Environment ============
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ============ OS ============
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ============ Logs ============
+*.log
+logs/
