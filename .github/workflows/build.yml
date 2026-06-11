@@ -16,13 +16,20 @@ jobs:
       - name: 还原 keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          ls -la release.keystore
+          SIZE=$(stat -c%s release.keystore)
+          echo "✅ keystore 大小: $SIZE bytes"
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "❌ keystore 文件太小，base64 损坏"
+            exit 1
+          fi
 
       - name: 注入 Secrets 密码
         run: |
+          sed -i "s|android.keystore = .*|android.keystore = /home/runner/work/live-auth/live-auth/release.keystore|" buildozer.spec
           sed -i "s/android.keystore_passwd = .*/android.keystore_passwd = ${{ secrets.KEYSTORE_PASS }}/" buildozer.spec
           sed -i "s/android.keypasswd = .*/android.keypasswd = ${{ secrets.KEY_PASS }}/" buildozer.spec
           sed -i "s/android.keyalias = .*/android.keyalias = ${{ secrets.KEY_ALIAS }}/" buildozer.spec
+          echo "📄 当前签名配置："
           grep "android.keystore\|android.key" buildozer.spec
 
       - name: 设置 Python
@@ -42,7 +49,7 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      - name: 安装依赖
+      - name: 安装系统依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y libtool-bin autoconf libltdl-dev libffi-dev libssl-dev openjdk-17-jdk
@@ -56,11 +63,25 @@ jobs:
       - name: 打包（debug 模式 + 自定义签名）
         run: buildozer -v android debug 2>&1 | tee build.log
 
+      - name: 强制 APK（删除 AAB）
+        if: always()
+        run: |
+          rm -f bin/*.aab
+          if ls bin/*.apk 2>/dev/null; then
+            APK=$(ls bin/*.apk | head -1)
+            echo "✅ 找到 APK: $APK"
+            echo "🔏 验证签名："
+            jarsigner -verify -verbose:summary -certs "$APK" 2>&1 | grep -E "CN=|warning" | head -3
+          else
+            echo "❌ 没找到 APK！"
+            ls -la bin/ 2>/dev/null
+          fi
+
       - name: 检查产物
         if: always()
         run: |
           echo "=== bin 目录 ==="
-          ls -laR bin/ 2>/dev/null || echo "❌ bin 目录不存在"
+          ls -laR bin/ 2>/dev/null || echo "❌ bin 不存在"
           echo ""
           echo "=== build.log 末尾 ==="
           tail -30 build.log 2>/dev/null
