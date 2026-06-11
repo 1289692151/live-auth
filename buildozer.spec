@@ -26,5 +26,3 @@ android.keystore_passwd = mallex2026
 android.keyalias = mallex
 android.keypasswd = mallex2026
 
-# 网络配置（允许 HTTP）
-android.network_security_config = %(source.dir)s/network_security_config.xml    ← 改：新增
